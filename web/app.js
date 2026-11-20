@@ -1,0 +1,1131 @@
+import {
+  THEMES,
+  resolveTheme,
+  renderCard,
+  renderTyping,
+  renderInfo,
+  renderStreak,
+  renderLink,
+  buildExportConfig,
+  buildWorkflowYaml,
+  buildReadmeMarkers,
+} from "./renderer.js";
+
+let nextId = 1;
+const uid = () => `c${nextId++}`;
+
+function createStarterState() {
+  return {
+    theme: "dashed-dark",
+    width: 560,
+    radius: 6,
+    useCustomColors: false,
+    style: {
+      bg: THEMES["dashed-dark"].bg,
+      stroke: THEMES["dashed-dark"].stroke,
+      text: THEMES["dashed-dark"].text,
+      muted: THEMES["dashed-dark"].muted,
+      link: THEMES["dashed-dark"].link,
+    },
+    cards: [
+      {
+        id: uid(),
+        type: "typing",
+        output: "typing.svg",
+        prompt_top: "┌ your-username",
+        prompt_bottom: "└›",
+        words: ["Hi", "fastfetch"],
+        duration: 8,
+        alt: "Typing banner",
+      },
+      {
+        id: uid(),
+        type: "info",
+        output: "info.svg",
+        alt: "Profile info",
+        sections: [
+          [
+            ["Host", "Your Name"],
+            ["Role", "Software Developer"],
+          ],
+          [
+            ["OS", "Linux x86_64"],
+            ["Editor", "Neovim"],
+            ["Shell", "zsh"],
+          ],
+        ],
+      },
+      {
+        id: uid(),
+        type: "streak",
+        output: "streak-card.svg",
+        user: "your-username",
+        timezone_offset: 7,
+        title: "Streak",
+        current_label: "Current streak",
+        longest_label: "Longest streak",
+        preview_current: 7,
+        preview_longest: 14,
+        alt: "GitHub streak",
+      },
+      {
+        id: uid(),
+        type: "link",
+        output: "contact-email.svg",
+        label: "Email",
+        value: "you@example.com",
+        url: "mailto:you@example.com",
+        alt: "Email",
+      },
+    ],
+  };
+}
+
+let state = createStarterState();
+let typingPaused = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+let previewBackdrop = "dark";
+let includePrivatePat = false;
+
+const el = {
+  motionToggle: document.getElementById("motion-toggle"),
+  themeToggle: document.getElementById("theme-toggle"),
+  mobileMenuBtn: document.getElementById("mobile-menu-btn"),
+  mobileNavPanel: document.getElementById("mobile-nav-panel"),
+  themePicker: document.getElementById("theme-picker"),
+  widthInput: document.getElementById("card-width"),
+  widthOut: document.getElementById("card-width-val"),
+  radiusInput: document.getElementById("card-radius"),
+  radiusOut: document.getElementById("card-radius-val"),
+  customColorsToggle: document.getElementById("custom-colors-toggle"),
+  customColorsPanel: document.getElementById("custom-colors-panel"),
+  styleBg: document.getElementById("style-bg"),
+  styleStroke: document.getElementById("style-stroke"),
+  styleText: document.getElementById("style-text"),
+  styleMuted: document.getElementById("style-muted"),
+  styleLink: document.getElementById("style-link"),
+  cardCountLabel: document.getElementById("card-count-label"),
+  cardsEditorList: document.getElementById("cards-editor-list"),
+  emptyCardsState: document.getElementById("empty-cards-state"),
+  livePreviewStage: document.getElementById("live-preview-stage"),
+  statusBanner: document.getElementById("status-banner"),
+  errorBanner: document.getElementById("error-banner"),
+  outputJson: document.getElementById("output-json"),
+  outputYaml: document.getElementById("output-yaml"),
+  outputMarkers: document.getElementById("output-markers"),
+  svgDownloadList: document.getElementById("svg-download-list"),
+  privatePatToggle: document.getElementById("private-pat-toggle"),
+  importDialog: document.getElementById("import-dialog"),
+  importTextarea: document.getElementById("import-textarea"),
+  importError: document.getElementById("import-error"),
+  openImportBtn: document.getElementById("open-import-btn"),
+};
+
+let statusTimer = null;
+function showStatus(msg) {
+  el.statusBanner.textContent = msg;
+  el.statusBanner.hidden = false;
+  clearTimeout(statusTimer);
+  statusTimer = setTimeout(() => {
+    el.statusBanner.hidden = true;
+  }, 4500);
+}
+
+function showValidationErrors(errors) {
+  if (!errors.length) {
+    el.errorBanner.hidden = true;
+    el.errorBanner.textContent = "";
+    return;
+  }
+  el.errorBanner.textContent = `Check before exporting: ${errors.join(" ")}`;
+  el.errorBanner.hidden = false;
+}
+
+function validateState() {
+  const errors = [];
+  const seenOutputs = new Set();
+  state.cards.forEach((card, idx) => {
+    const label = `Card ${idx + 1} (${card.type})`;
+    const out = (card.output || "").trim();
+    if (!out || !out.endsWith(".svg")) {
+      errors.push(`${label} output filename must end with .svg.`);
+    } else if (seenOutputs.has(out)) {
+      errors.push(`Duplicate output filename "${out}".`);
+    } else {
+      seenOutputs.add(out);
+    }
+    if (card.type === "streak" && !(card.user || "").trim()) {
+      errors.push(`${label} needs a GitHub username.`);
+    }
+    if (card.type === "link" && card.url && !/^(https?:\/\/|mailto:)/i.test(card.url.trim())) {
+      errors.push(`${label} URL should start with https:// or mailto:.`);
+    }
+  });
+  showValidationErrors(errors);
+  return errors;
+}
+
+function renderGallerySpecimens() {
+  const opts = { paused: typingPaused };
+  const specimens = {
+    "typing-dark": renderTyping(
+      { prompt_top: "┌ bagasadh", prompt_bottom: "└›", words: ["Hi", "fastfetch"], duration: 8 },
+      resolveTheme({ theme: "dashed-dark", width: 460 }),
+      opts
+    ),
+    "info-dark": renderInfo(
+      {
+        sections: [
+          [
+            ["Host", "Your Name"],
+            ["Role", "Developer"],
+          ],
+          [
+            ["OS", "Arch Linux"],
+            ["WM", "i3 (X11)"],
+          ],
+        ],
+      },
+      resolveTheme({ theme: "dashed-dark", width: 460 })
+    ),
+    "streak-green": renderStreak(
+      {
+        title: "Streak",
+        current_label: "Current streak",
+        longest_label: "Longest streak",
+        preview_current: 13,
+        preview_longest: 13,
+        preview_current_range: "Sample preview",
+        preview_longest_range: "Live via Action",
+      },
+      resolveTheme({ theme: "terminal-green", width: 460 })
+    ),
+    "light-pair":
+      renderTyping(
+        { prompt_top: "┌ studio", prompt_bottom: "$", words: ["build", "ship"], duration: 7 },
+        resolveTheme({ theme: "dashed-light", width: 460 }),
+        opts
+      ) +
+      renderLink(
+        { label: "Email", value: "you@example.com" },
+        resolveTheme({ theme: "dashed-light", width: 460 })
+      ),
+    "solid-dark-streak": renderStreak(
+      {
+        title: "Activity",
+        current_label: "Current streak",
+        longest_label: "Longest streak",
+        preview_current: 9,
+        preview_longest: 21,
+        preview_current_range: "Sample preview",
+        preview_longest_range: "Live via Action",
+      },
+      resolveTheme({ theme: "solid-dark", width: 460 })
+    ),
+    "solid-light-link":
+      renderLink(
+        { label: "Portfolio", value: "your-site.dev" },
+        resolveTheme({ theme: "solid-light", width: 460 })
+      ) +
+      renderLink(
+        { label: "GitHub", value: "@your-username" },
+        resolveTheme({ theme: "solid-light", width: 460 })
+      ),
+  };
+
+  document.querySelectorAll("[data-specimen]").forEach((node) => {
+    const key = node.getAttribute("data-specimen");
+    if (specimens[key]) {
+      node.innerHTML = specimens[key];
+    }
+  });
+}
+
+function renderThemePicker() {
+  el.themePicker.innerHTML = "";
+  for (const [key, theme] of Object.entries(THEMES)) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "theme-chip";
+    btn.setAttribute("role", "radio");
+    btn.setAttribute("aria-checked", String(state.theme === key));
+    btn.dataset.themeKey = key;
+
+    const swatch = document.createElement("span");
+    swatch.className = "theme-swatch";
+    swatch.style.background = theme.bg;
+    swatch.style.border = `2px ${theme.dasharray ? "dashed" : "solid"} ${theme.stroke}`;
+
+    const label = document.createElement("span");
+    label.textContent = theme.label;
+
+    btn.append(swatch, label);
+    btn.addEventListener("click", () => selectCardTheme(key));
+    el.themePicker.appendChild(btn);
+  }
+}
+
+function selectCardTheme(key, announce = false) {
+  if (!THEMES[key]) return;
+  state.theme = key;
+  if (!state.useCustomColors) {
+    syncColorInputsFromTheme(key);
+  }
+  if (key.includes("light")) {
+    setPreviewBackdrop("light");
+  } else {
+    setPreviewBackdrop("dark");
+  }
+  renderThemePicker();
+  renderPreviewAndExport();
+  if (announce) {
+    showStatus(`Loaded ${THEMES[key].label} theme into the builder.`);
+  }
+}
+
+function syncColorInputsFromTheme(key) {
+  const t = THEMES[key] || THEMES["dashed-dark"];
+  state.style = {
+    bg: t.bg,
+    stroke: t.stroke,
+    text: t.text,
+    muted: t.muted,
+    link: t.link,
+  };
+  el.styleBg.value = t.bg;
+  el.styleStroke.value = t.stroke;
+  el.styleText.value = t.text;
+  el.styleMuted.value = t.muted;
+  el.styleLink.value = t.link;
+}
+
+function syncFrameControls() {
+  el.widthInput.value = String(state.width);
+  el.widthOut.textContent = `${state.width}px`;
+  el.radiusInput.value = String(state.radius);
+  el.radiusOut.textContent = `${state.radius}px`;
+  el.customColorsToggle.checked = Boolean(state.useCustomColors);
+  el.customColorsPanel.hidden = !state.useCustomColors;
+  el.styleBg.value = state.style.bg;
+  el.styleStroke.value = state.style.stroke;
+  el.styleText.value = state.style.text;
+  el.styleMuted.value = state.style.muted;
+  el.styleLink.value = state.style.link;
+}
+
+function makeLabeledInput({ id, labelText, value, type = "text", placeholder = "", onInput }) {
+  const wrap = document.createElement("div");
+  wrap.className = "field";
+  const label = document.createElement("label");
+  label.className = "field-label";
+  label.htmlFor = id;
+  label.textContent = labelText;
+
+  const input = document.createElement("input");
+  input.id = id;
+  input.type = type;
+  input.className = "text-input";
+  input.value = value ?? "";
+  if (placeholder) input.placeholder = placeholder;
+  input.addEventListener("input", (e) => onInput(e.target.value));
+
+  wrap.append(label, input);
+  return wrap;
+}
+
+function renderCardsEditor() {
+  el.cardsEditorList.innerHTML = "";
+  const count = state.cards.length;
+  el.cardCountLabel.textContent = `${count} ${count === 1 ? "card" : "cards"}`;
+  el.emptyCardsState.hidden = count > 0;
+
+  state.cards.forEach((card, idx) => {
+    const box = document.createElement("article");
+    box.className = "card-editor";
+
+    const head = document.createElement("div");
+    head.className = "card-editor-head";
+
+    const title = document.createElement("span");
+    title.className = "card-type-title";
+    title.textContent = `${String(idx + 1).padStart(2, "0")} / ${card.type.toUpperCase()}`;
+
+    const actions = document.createElement("div");
+    actions.className = "card-editor-actions";
+
+    const upBtn = document.createElement("button");
+    upBtn.type = "button";
+    upBtn.className = "icon-action-btn";
+    upBtn.textContent = "Up";
+    upBtn.disabled = idx === 0;
+    upBtn.setAttribute("aria-label", `Move card ${idx + 1} up`);
+    upBtn.addEventListener("click", () => {
+      [state.cards[idx - 1], state.cards[idx]] = [state.cards[idx], state.cards[idx - 1]];
+      renderCardsEditor();
+      renderPreviewAndExport();
+    });
+
+    const downBtn = document.createElement("button");
+    downBtn.type = "button";
+    downBtn.className = "icon-action-btn";
+    downBtn.textContent = "Down";
+    downBtn.disabled = idx === state.cards.length - 1;
+    downBtn.setAttribute("aria-label", `Move card ${idx + 1} down`);
+    downBtn.addEventListener("click", () => {
+      [state.cards[idx + 1], state.cards[idx]] = [state.cards[idx], state.cards[idx + 1]];
+      renderCardsEditor();
+      renderPreviewAndExport();
+    });
+
+    const delBtn = document.createElement("button");
+    delBtn.type = "button";
+    delBtn.className = "icon-action-btn btn-danger";
+    delBtn.textContent = "Remove";
+    delBtn.setAttribute("aria-label", `Remove ${card.type} card ${idx + 1}`);
+    delBtn.addEventListener("click", () => {
+      state.cards.splice(idx, 1);
+      renderCardsEditor();
+      renderPreviewAndExport();
+      showStatus(`Removed ${card.type} card.`);
+    });
+
+    actions.append(upBtn, downBtn, delBtn);
+    head.append(title, actions);
+    box.appendChild(head);
+
+    const fields = document.createElement("div");
+    fields.className = "editor-fields";
+
+    if (card.type === "typing") {
+      const topRow = document.createElement("div");
+      topRow.className = "two-col";
+      topRow.append(
+        makeLabeledInput({
+          id: `${card.id}-top`,
+          labelText: "Top prompt line",
+          value: card.prompt_top,
+          placeholder: "┌ your-username",
+          onInput: (v) => {
+            card.prompt_top = v;
+            renderPreviewAndExport();
+          },
+        }),
+        makeLabeledInput({
+          id: `${card.id}-bottom`,
+          labelText: "Bottom prompt prefix",
+          value: card.prompt_bottom,
+          placeholder: "└›",
+          onInput: (v) => {
+            card.prompt_bottom = v;
+            renderPreviewAndExport();
+          },
+        })
+      );
+      fields.appendChild(topRow);
+
+      fields.appendChild(
+        makeLabeledInput({
+          id: `${card.id}-words`,
+          labelText: "Typed words (comma separated)",
+          value: card.words.join(", "),
+          placeholder: "Hi, fastfetch",
+          onInput: (v) => {
+            card.words = v.split(",").map((w) => w.trim()).filter(Boolean);
+            if (!card.words.length) card.words = ["Hi"];
+            renderPreviewAndExport();
+          },
+        })
+      );
+
+      const bottomRow = document.createElement("div");
+      bottomRow.className = "two-col";
+      bottomRow.append(
+        makeLabeledInput({
+          id: `${card.id}-dur`,
+          labelText: "Loop duration (seconds)",
+          value: card.duration,
+          type: "number",
+          onInput: (v) => {
+            card.duration = Math.max(2, Number(v) || 8);
+            renderPreviewAndExport();
+          },
+        }),
+        makeLabeledInput({
+          id: `${card.id}-out`,
+          labelText: "Output SVG filename",
+          value: card.output,
+          placeholder: "typing.svg",
+          onInput: (v) => {
+            card.output = v;
+            renderPreviewAndExport();
+          },
+        })
+      );
+      fields.appendChild(bottomRow);
+    } else if (card.type === "info") {
+      fields.appendChild(
+        makeLabeledInput({
+          id: `${card.id}-out`,
+          labelText: "Output SVG filename",
+          value: card.output,
+          placeholder: "info.svg",
+          onInput: (v) => {
+            card.output = v;
+            renderPreviewAndExport();
+          },
+        })
+      );
+
+      card.sections.forEach((sec, sIdx) => {
+        const secBox = document.createElement("div");
+        secBox.className = "info-section-box";
+
+        const secHead = document.createElement("div");
+        secHead.className = "info-section-head";
+        const secLabel = document.createElement("span");
+        secLabel.className = "mono-meta";
+        secLabel.textContent = `Group ${sIdx + 1}`;
+
+        const secBtns = document.createElement("div");
+        secBtns.className = "section-row-actions";
+
+        const addRowBtn = document.createElement("button");
+        addRowBtn.type = "button";
+        addRowBtn.className = "icon-action-btn";
+        addRowBtn.textContent = "+ Row";
+        addRowBtn.addEventListener("click", () => {
+          sec.push(["Label", "Value"]);
+          renderCardsEditor();
+          renderPreviewAndExport();
+        });
+        secBtns.appendChild(addRowBtn);
+
+        if (card.sections.length > 1) {
+          const rmSecBtn = document.createElement("button");
+          rmSecBtn.type = "button";
+          rmSecBtn.className = "icon-action-btn btn-danger";
+          rmSecBtn.textContent = "Remove group";
+          rmSecBtn.addEventListener("click", () => {
+            card.sections.splice(sIdx, 1);
+            renderCardsEditor();
+            renderPreviewAndExport();
+          });
+          secBtns.appendChild(rmSecBtn);
+        }
+
+        secHead.append(secLabel, secBtns);
+        secBox.appendChild(secHead);
+
+        sec.forEach((row, rIdx) => {
+          const rowGrid = document.createElement("div");
+          rowGrid.className = "info-row-grid";
+          rowGrid.append(
+            makeLabeledInput({
+              id: `${card.id}-s${sIdx}-r${rIdx}-k`,
+              labelText: "Key",
+              value: row[0],
+              placeholder: "OS",
+              onInput: (v) => {
+                row[0] = v;
+                renderPreviewAndExport();
+              },
+            }),
+            makeLabeledInput({
+              id: `${card.id}-s${sIdx}-r${rIdx}-v`,
+              labelText: "Value",
+              value: row[1],
+              placeholder: "Linux",
+              onInput: (v) => {
+                row[1] = v;
+                renderPreviewAndExport();
+              },
+            })
+          );
+
+          const rmRowBtn = document.createElement("button");
+          rmRowBtn.type = "button";
+          rmRowBtn.className = "icon-action-btn";
+          rmRowBtn.textContent = "Del";
+          rmRowBtn.disabled = sec.length <= 1;
+          rmRowBtn.setAttribute("aria-label", `Delete row ${rIdx + 1} in group ${sIdx + 1}`);
+          rmRowBtn.addEventListener("click", () => {
+            sec.splice(rIdx, 1);
+            renderCardsEditor();
+            renderPreviewAndExport();
+          });
+          rowGrid.appendChild(rmRowBtn);
+          secBox.appendChild(rowGrid);
+        });
+
+        fields.appendChild(secBox);
+      });
+
+      const addGroupBtn = document.createElement("button");
+      addGroupBtn.type = "button";
+      addGroupBtn.className = "add-btn";
+      addGroupBtn.textContent = "+ Add divider group";
+      addGroupBtn.addEventListener("click", () => {
+        card.sections.push([["Stack", "TypeScript / Python"]]);
+        renderCardsEditor();
+        renderPreviewAndExport();
+      });
+      fields.appendChild(addGroupBtn);
+    } else if (card.type === "streak") {
+      const row1 = document.createElement("div");
+      row1.className = "two-col";
+      row1.append(
+        makeLabeledInput({
+          id: `${card.id}-user`,
+          labelText: "GitHub username",
+          value: card.user,
+          placeholder: "your-username",
+          onInput: (v) => {
+            card.user = v;
+            renderPreviewAndExport();
+          },
+        }),
+        makeLabeledInput({
+          id: `${card.id}-tz`,
+          labelText: "Timezone offset (hours from UTC)",
+          value: card.timezone_offset,
+          type: "number",
+          onInput: (v) => {
+            card.timezone_offset = Number(v) || 0;
+            renderPreviewAndExport();
+          },
+        })
+      );
+
+      const row2 = document.createElement("div");
+      row2.className = "two-col";
+      row2.append(
+        makeLabeledInput({
+          id: `${card.id}-title`,
+          labelText: "Card title",
+          value: card.title,
+          placeholder: "Streak",
+          onInput: (v) => {
+            card.title = v;
+            renderPreviewAndExport();
+          },
+        }),
+        makeLabeledInput({
+          id: `${card.id}-out`,
+          labelText: "Output SVG filename",
+          value: card.output,
+          placeholder: "streak-card.svg",
+          onInput: (v) => {
+            card.output = v;
+            renderPreviewAndExport();
+          },
+        })
+      );
+
+      const row3 = document.createElement("div");
+      row3.className = "two-col";
+      row3.append(
+        makeLabeledInput({
+          id: `${card.id}-cur`,
+          labelText: "Left column label",
+          value: card.current_label,
+          placeholder: "Current streak",
+          onInput: (v) => {
+            card.current_label = v;
+            renderPreviewAndExport();
+          },
+        }),
+        makeLabeledInput({
+          id: `${card.id}-best`,
+          labelText: "Right column label",
+          value: card.longest_label,
+          placeholder: "Longest streak",
+          onInput: (v) => {
+            card.longest_label = v;
+            renderPreviewAndExport();
+          },
+        })
+      );
+
+      fields.append(row1, row2, row3);
+    } else if (card.type === "link") {
+      const row1 = document.createElement("div");
+      row1.className = "two-col";
+      row1.append(
+        makeLabeledInput({
+          id: `${card.id}-lbl`,
+          labelText: "Left label",
+          value: card.label,
+          placeholder: "Email",
+          onInput: (v) => {
+            card.label = v;
+            renderPreviewAndExport();
+          },
+        }),
+        makeLabeledInput({
+          id: `${card.id}-val`,
+          labelText: "Right display text",
+          value: card.value,
+          placeholder: "you@example.com",
+          onInput: (v) => {
+            card.value = v;
+            renderPreviewAndExport();
+          },
+        })
+      );
+
+      const row2 = document.createElement("div");
+      row2.className = "two-col";
+      row2.append(
+        makeLabeledInput({
+          id: `${card.id}-url`,
+          labelText: "Destination URL",
+          value: card.url,
+          placeholder: "mailto:you@example.com",
+          onInput: (v) => {
+            card.url = v;
+            renderPreviewAndExport();
+          },
+        }),
+        makeLabeledInput({
+          id: `${card.id}-out`,
+          labelText: "Output SVG filename",
+          value: card.output,
+          placeholder: "contact-email.svg",
+          onInput: (v) => {
+            card.output = v;
+            renderPreviewAndExport();
+          },
+        })
+      );
+
+      fields.append(row1, row2);
+    }
+
+    box.appendChild(fields);
+    el.cardsEditorList.appendChild(box);
+  });
+}
+
+function renderPreviewAndExport() {
+  validateState();
+
+  const resolvedTheme = resolveTheme({
+    theme: state.theme,
+    width: state.width,
+    radius: state.radius,
+    style: state.useCustomColors ? state.style : undefined,
+  });
+
+  el.livePreviewStage.innerHTML = "";
+  el.svgDownloadList.innerHTML = "";
+
+  if (!state.cards.length) {
+    const note = document.createElement("p");
+    note.className = "preview-empty-note";
+    note.textContent = "Preview is empty. Add a card on the left to see it rendered here.";
+    el.livePreviewStage.appendChild(note);
+  } else {
+    state.cards.forEach((card, idx) => {
+      const svg = renderCard(card, resolvedTheme, { paused: typingPaused });
+      const item = document.createElement("div");
+      item.className = "preview-item";
+      item.innerHTML = svg;
+      el.livePreviewStage.appendChild(item);
+
+      const filename = (card.output || `${card.type}-${idx + 1}.svg`).trim();
+      const dlBtn = document.createElement("button");
+      dlBtn.type = "button";
+      dlBtn.className = "ctrl-btn";
+      dlBtn.textContent = `Download ${filename}`;
+      dlBtn.addEventListener("click", () => {
+        const exportSvg = renderCard(card, resolvedTheme, { paused: false });
+        downloadTextFile(filename, exportSvg, "image/svg+xml");
+        showStatus(`Downloaded ${filename}.`);
+      });
+      el.svgDownloadList.appendChild(dlBtn);
+    });
+  }
+
+  const exportConfig = buildExportConfig(state);
+  el.outputJson.textContent = `${JSON.stringify(exportConfig, null, 2)}\n`;
+  el.outputYaml.textContent = buildWorkflowYaml({ includePrivate: includePrivatePat });
+  el.outputMarkers.textContent = buildReadmeMarkers();
+}
+
+function addCard(type) {
+  const n = state.cards.filter((c) => c.type === type).length + 1;
+  const suffix = n > 1 ? `-${n}` : "";
+  if (type === "typing") {
+    state.cards.push({
+      id: uid(),
+      type: "typing",
+      output: `typing${suffix}.svg`,
+      prompt_top: "┌ your-username",
+      prompt_bottom: "└›",
+      words: ["Hi", "fastfetch"],
+      duration: 8,
+      alt: "Typing banner",
+    });
+  } else if (type === "info") {
+    state.cards.push({
+      id: uid(),
+      type: "info",
+      output: `info${suffix}.svg`,
+      alt: "Profile info",
+      sections: [
+        [
+          ["Host", "Your Name"],
+          ["Role", "Developer"],
+        ],
+      ],
+    });
+  } else if (type === "streak") {
+    state.cards.push({
+      id: uid(),
+      type: "streak",
+      output: `streak-card${suffix}.svg`,
+      user: "your-username",
+      timezone_offset: 7,
+      title: "Streak",
+      current_label: "Current streak",
+      longest_label: "Longest streak",
+      preview_current: 7,
+      preview_longest: 14,
+      alt: "GitHub streak",
+    });
+  } else if (type === "link") {
+    state.cards.push({
+      id: uid(),
+      type: "link",
+      output: `link${suffix}.svg`,
+      label: "GitHub",
+      value: "@your-username",
+      url: "https://github.com/your-username",
+      alt: "GitHub",
+    });
+  }
+  renderCardsEditor();
+  renderPreviewAndExport();
+  showStatus(`Added ${type} card.`);
+}
+
+async function copyText(text, label) {
+  try {
+    await navigator.clipboard.writeText(text);
+    showStatus(`Copied ${label} to clipboard.`);
+  } catch {
+    showStatus(`Clipboard blocked by browser. Select and copy ${label} manually from the box below.`);
+  }
+}
+
+function downloadTextFile(filename, content, mime = "text/plain") {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function setPreviewBackdrop(mode) {
+  previewBackdrop = mode === "light" ? "light" : "dark";
+  el.livePreviewStage.classList.toggle("backdrop-dark", previewBackdrop === "dark");
+  el.livePreviewStage.classList.toggle("backdrop-light", previewBackdrop === "light");
+  document.querySelectorAll("[data-backdrop]").forEach((btn) => {
+    const active = btn.dataset.backdrop === previewBackdrop;
+    btn.classList.toggle("is-active", active);
+    btn.setAttribute("aria-pressed", String(active));
+  });
+}
+
+function applyPageTheme(mode) {
+  const isLight = mode === "light";
+  document.documentElement.setAttribute("data-theme", isLight ? "light" : "dark");
+  el.themeToggle.textContent = isLight ? "Dark mode" : "Light mode";
+  el.themeToggle.setAttribute("aria-pressed", String(isLight));
+}
+
+function updateMotionButton() {
+  el.motionToggle.textContent = typingPaused ? "Play typing" : "Pause typing";
+  el.motionToggle.setAttribute("aria-pressed", String(typingPaused));
+}
+
+function importConfigFromText(rawText) {
+  el.importError.hidden = true;
+  let parsed;
+  try {
+    parsed = JSON.parse(rawText);
+  } catch (err) {
+    el.importError.textContent = `Invalid JSON syntax: ${err.message}`;
+    el.importError.hidden = false;
+    return false;
+  }
+
+  if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.cards)) {
+    el.importError.textContent = 'Expected a JSON object with a "cards" array.';
+    el.importError.hidden = false;
+    return false;
+  }
+
+  const nextTheme = THEMES[parsed.theme] ? parsed.theme : "dashed-dark";
+  const hasStyle = parsed.style && typeof parsed.style === "object" && Object.keys(parsed.style).length > 0;
+  const baseT = THEMES[nextTheme];
+
+  const importedCards = [];
+  for (let i = 0; i < parsed.cards.length; i += 1) {
+    const c = parsed.cards[i];
+    if (!c || !["typing", "info", "streak", "link"].includes(c.type)) {
+      el.importError.textContent = `Card #${i + 1} has unsupported type "${c?.type}". Use typing, info, streak, or link.`;
+      el.importError.hidden = false;
+      return false;
+    }
+    if (c.type === "typing") {
+      importedCards.push({
+        id: uid(),
+        type: "typing",
+        output: c.output || `typing-${i + 1}.svg`,
+        prompt_top: c.prompt_top ?? "┌ your-username",
+        prompt_bottom: c.prompt_bottom ?? "└›",
+        words: Array.isArray(c.words) && c.words.length ? c.words.map(String) : ["Hi"],
+        duration: Number(c.duration) || 8,
+        alt: c.alt || "Typing banner",
+      });
+    } else if (c.type === "info") {
+      const rawSections = Array.isArray(c.sections) && c.sections.length
+        ? c.sections
+        : Array.isArray(c.rows)
+        ? [c.rows]
+        : [[["Host", "Your Name"]]];
+      importedCards.push({
+        id: uid(),
+        type: "info",
+        output: c.output || `info-${i + 1}.svg`,
+        alt: c.alt || "Profile info",
+        sections: rawSections.map((sec) =>
+          sec.map((row) => (Array.isArray(row) ? [String(row[0] ?? ""), String(row[1] ?? "")] : [String(row.label ?? ""), String(row.value ?? "")]))
+        ),
+      });
+    } else if (c.type === "streak") {
+      importedCards.push({
+        id: uid(),
+        type: "streak",
+        output: c.output || `streak-${i + 1}.svg`,
+        user: String(c.user || "your-username"),
+        timezone_offset: Number(c.timezone_offset) || 0,
+        title: String(c.title || "Streak"),
+        current_label: String(c.current_label || "Current streak"),
+        longest_label: String(c.longest_label || "Longest streak"),
+        preview_current: 7,
+        preview_longest: 14,
+        alt: c.alt || "GitHub streak",
+      });
+    } else {
+      importedCards.push({
+        id: uid(),
+        type: "link",
+        output: c.output || `link-${i + 1}.svg`,
+        label: String(c.label || "Link"),
+        value: String(c.value || ""),
+        url: String(c.url || ""),
+        alt: c.alt || c.label || "Link",
+      });
+    }
+  }
+
+  state = {
+    theme: nextTheme,
+    width: Number(parsed.width) || 560,
+    radius: Number(parsed.radius ?? 6),
+    useCustomColors: Boolean(hasStyle),
+    style: {
+      bg: parsed.style?.bg || baseT.bg,
+      stroke: parsed.style?.stroke || baseT.stroke,
+      text: parsed.style?.text || baseT.text,
+      muted: parsed.style?.muted || baseT.muted,
+      link: parsed.style?.link || baseT.link,
+    },
+    cards: importedCards,
+  };
+
+  syncFrameControls();
+  renderThemePicker();
+  renderCardsEditor();
+  renderPreviewAndExport();
+  showStatus(`Imported ${importedCards.length} card(s) from JSON.`);
+  return true;
+}
+
+function wireEvents() {
+  el.motionToggle.addEventListener("click", () => {
+    typingPaused = !typingPaused;
+    updateMotionButton();
+    renderGallerySpecimens();
+    renderPreviewAndExport();
+  });
+
+  el.themeToggle.addEventListener("click", () => {
+    const current = document.documentElement.getAttribute("data-theme");
+    applyPageTheme(current === "dark" ? "light" : "dark");
+  });
+
+  el.mobileMenuBtn.addEventListener("click", () => {
+    const open = el.mobileNavPanel.hidden;
+    el.mobileNavPanel.hidden = !open;
+    el.mobileMenuBtn.setAttribute("aria-expanded", String(open));
+  });
+
+  el.mobileNavPanel.querySelectorAll("a").forEach((link) => {
+    link.addEventListener("click", () => {
+      el.mobileNavPanel.hidden = true;
+      el.mobileMenuBtn.setAttribute("aria-expanded", "false");
+    });
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !el.mobileNavPanel.hidden) {
+      el.mobileNavPanel.hidden = true;
+      el.mobileMenuBtn.setAttribute("aria-expanded", "false");
+      el.mobileMenuBtn.focus();
+    }
+  });
+
+  document.querySelectorAll("[data-preset]").forEach((tile) => {
+    tile.addEventListener("click", () => {
+      const preset = tile.getAttribute("data-preset");
+      selectCardTheme(preset, true);
+      document.getElementById("builder").scrollIntoView({ behavior: "smooth" });
+    });
+  });
+
+  el.widthInput.addEventListener("input", (e) => {
+    state.width = Number(e.target.value);
+    el.widthOut.textContent = `${state.width}px`;
+    renderPreviewAndExport();
+  });
+
+  el.radiusInput.addEventListener("input", (e) => {
+    state.radius = Number(e.target.value);
+    el.radiusOut.textContent = `${state.radius}px`;
+    renderPreviewAndExport();
+  });
+
+  el.customColorsToggle.addEventListener("change", (e) => {
+    state.useCustomColors = e.target.checked;
+    el.customColorsPanel.hidden = !state.useCustomColors;
+    renderPreviewAndExport();
+  });
+
+  for (const [inputEl, key] of [
+    [el.styleBg, "bg"],
+    [el.styleStroke, "stroke"],
+    [el.styleText, "text"],
+    [el.styleMuted, "muted"],
+    [el.styleLink, "link"],
+  ]) {
+    inputEl.addEventListener("input", (e) => {
+      state.style[key] = e.target.value;
+      renderPreviewAndExport();
+    });
+  }
+
+  document.querySelectorAll("[data-add-card]").forEach((btn) => {
+    btn.addEventListener("click", () => addCard(btn.dataset.addCard));
+  });
+
+  const resetAll = () => {
+    state = createStarterState();
+    syncFrameControls();
+    renderThemePicker();
+    renderCardsEditor();
+    renderPreviewAndExport();
+    showStatus("Restored starter profile cards.");
+  };
+  document.getElementById("reset-default-btn").addEventListener("click", resetAll);
+  document.getElementById("restore-from-empty-btn").addEventListener("click", resetAll);
+
+  document.querySelectorAll("[data-backdrop]").forEach((btn) => {
+    btn.addEventListener("click", () => setPreviewBackdrop(btn.dataset.backdrop));
+  });
+
+  // Export tabs with click + Left/Right keyboard navigation.
+  const tabs = [...document.querySelectorAll('[role="tab"]')];
+  const activateTab = (tab) => {
+    tabs.forEach((t) => {
+      const selected = t === tab;
+      t.classList.toggle("is-active", selected);
+      t.setAttribute("aria-selected", String(selected));
+      t.tabIndex = selected ? 0 : -1;
+      const panel = document.getElementById(t.getAttribute("aria-controls"));
+      if (panel) panel.hidden = !selected;
+    });
+  };
+  tabs.forEach((tab, idx) => {
+    tab.tabIndex = idx === 0 ? 0 : -1;
+    tab.addEventListener("click", () => activateTab(tab));
+    tab.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowRight") {
+        const next = tabs[(idx + 1) % tabs.length];
+        activateTab(next);
+        next.focus();
+      } else if (e.key === "ArrowLeft") {
+        const prev = tabs[(idx - 1 + tabs.length) % tabs.length];
+        activateTab(prev);
+        prev.focus();
+      }
+    });
+  });
+
+  el.privatePatToggle.addEventListener("change", (e) => {
+    includePrivatePat = e.target.checked;
+    renderPreviewAndExport();
+  });
+
+  document.getElementById("copy-json-btn").addEventListener("click", () => {
+    copyText(el.outputJson.textContent, "termcard.json");
+  });
+  document.getElementById("download-json-btn").addEventListener("click", () => {
+    downloadTextFile("termcard.json", el.outputJson.textContent, "application/json");
+    showStatus("Downloaded termcard.json.");
+  });
+  document.getElementById("copy-yaml-btn").addEventListener("click", () => {
+    copyText(el.outputYaml.textContent, "termcard.yml");
+  });
+  document.getElementById("download-yaml-btn").addEventListener("click", () => {
+    downloadTextFile("termcard.yml", el.outputYaml.textContent, "text/yaml");
+    showStatus("Downloaded termcard.yml.");
+  });
+  document.getElementById("copy-markers-btn").addEventListener("click", () => {
+    copyText(el.outputMarkers.textContent, "README markers");
+  });
+
+  // Import modal (native <dialog> handles Escape; return focus on close).
+  const closeDialog = () => {
+    el.importDialog.close();
+    el.openImportBtn.focus();
+  };
+  el.openImportBtn.addEventListener("click", () => {
+    el.importError.hidden = true;
+    el.importTextarea.value = el.outputJson.textContent.trim();
+    el.importDialog.showModal();
+    el.importTextarea.focus();
+  });
+  document.getElementById("close-import-btn").addEventListener("click", closeDialog);
+  document.getElementById("cancel-import-btn").addEventListener("click", closeDialog);
+  document.getElementById("apply-import-btn").addEventListener("click", () => {
+    if (importConfigFromText(el.importTextarea.value)) {
+      closeDialog();
+    }
+  });
+}
+
+// Boot
+updateMotionButton();
+applyPageTheme("dark");
+syncFrameControls();
+renderThemePicker();
+renderGallerySpecimens();
+renderCardsEditor();
+renderPreviewAndExport();
+wireEvents();

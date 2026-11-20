@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>termcard by bagasadh: Terminal SVG Profile Card Builder</title>
+  <meta name="description" content="Visual builder for termcard: create terminal-styled SVG cards for GitHub READMEs and export termcard.json plus a ready-to-use GitHub Action workflow.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body id="top">
+  <a href="#builder" class="skip-link">Skip to card builder</a>
+
+  <header class="site-header">
+    <div class="header-inner">
+      <a href="#top" class="brand-mark">
+        <span class="brand-name">termcard</span>
+        <span class="brand-by">by bagasadh</span>
+      </a>
+
+      <nav class="primary-nav" aria-label="Primary">
+        <a href="#gallery">Gallery</a>
+        <a href="#builder">Builder</a>
+        <a href="#setup">GitHub setup</a>
+        <a href="https://github.com/bagasadh/termcard" target="_blank" rel="noopener noreferrer">GitHub</a>
+      </nav>
+
+      <div class="header-controls">
+        <button type="button" id="motion-toggle" class="ctrl-btn" aria-pressed="false">
+          Pause typing
+        </button>
+        <button type="button" id="theme-toggle" class="ctrl-btn" aria-pressed="false">
+          Light mode
+        </button>
+        <button type="button" id="mobile-menu-btn" class="ctrl-btn mobile-only" aria-expanded="false" aria-controls="mobile-nav-panel">
+          Menu
+        </button>
+      </div>
+    </div>
+
+    <nav id="mobile-nav-panel" class="mobile-nav" aria-label="Mobile navigation" hidden>
+      <a href="#gallery">Gallery</a>
+      <a href="#builder">Builder</a>
+      <a href="#setup">GitHub setup</a>
+      <a href="https://github.com/bagasadh/termcard" target="_blank" rel="noopener noreferrer">GitHub repository</a>
+      <a href="https://github.com/marketplace/actions/termcard-profile-svg-generator" target="_blank" rel="noopener noreferrer">GitHub Marketplace</a>
+    </nav>
+  </header>
+
+  <main>
+    <section id="gallery" class="gallery-section" aria-label="SVG card showcase gallery">
+      <div class="gallery-wall">
+        <button type="button" class="wall-tile tile-specimen tile-s1" data-preset="dashed-dark" aria-label="Load Dashed Dark typing card preset into builder">
+          <div class="specimen-stage stage-gh-dark" data-specimen="typing-dark"></div>
+          <div class="tile-meta">
+            <span>01 / Typing</span>
+            <span>dashed-dark</span>
+          </div>
+        </button>
+
+        <button type="button" class="wall-tile tile-specimen tile-s2" data-preset="dashed-dark" aria-label="Load Dashed Dark info card preset into builder">
+          <div class="specimen-stage stage-gh-dark" data-specimen="info-dark"></div>
+          <div class="tile-meta">
+            <span>02 / Info specs</span>
+            <span>dashed-dark</span>
+          </div>
+        </button>
+
+        <div class="wall-tile tile-editorial tile-s3">
+          <p class="editorial-kicker">GITHUB PROFILE TOOLKIT</p>
+          <p class="editorial-quote">
+            No hosted server, no API quotas. <em>One JSON file and a GitHub Action.</em>
+          </p>
+          <p class="editorial-foot">Click any card tile to load its theme in the builder.</p>
+        </div>
+
+        <button type="button" class="wall-tile tile-specimen tile-s4" data-preset="terminal-green" aria-label="Load Terminal Green streak card preset into builder">
+          <div class="specimen-stage stage-gh-dark" data-specimen="streak-green"></div>
+          <div class="tile-meta">
+            <span>03 / Live streak</span>
+            <span>terminal-green</span>
+          </div>
+        </button>
+
+        <div class="wall-tile tile-brand tile-center">
+          <div class="brand-top-meta">
+            <span>OPEN SOURCE ACTION</span>
+            <span>MIT / PYTHON 3</span>
+          </div>
+          <div class="brand-hero-copy">
+            <h1>termcard</h1>
+            <p class="brand-sub">by <em>bagasadh</em></p>
+            <p class="brand-desc">
+              Terminal-styled SVG cards for GitHub READMEs. Customize visually here, then copy your JSON and workflow file.
+            </p>
+          </div>
+          <div class="brand-actions">
+            <a href="#builder" class="btn-primary">Build your cards</a>
+            <a href="https://github.com/marketplace/actions/termcard-profile-svg-generator" target="_blank" rel="noopener noreferrer" class="btn-secondary-bone">Marketplace</a>
+          </div>
+        </div>
+
+        <button type="button" class="wall-tile tile-specimen tile-s5" data-preset="dashed-light" aria-label="Load Dashed Light preset into builder">
+          <div class="specimen-stage stage-gh-light" data-specimen="light-pair"></div>
+          <div class="tile-meta">
+            <span>04 / Light theme</span>
+            <span>dashed-light</span>
+          </div>
+        </button>
+
+        <a href="#builder" class="wall-tile tile-accent tile-s6">
+          <span class="accent-index">04 CARD TYPES / 05 THEMES</span>
+          <span class="accent-heading">Configure &amp; export now</span>
+          <span class="accent-note">Outputs termcard.json, workflow YAML, and raw SVGs.</span>
+        </a>
+
+        <button type="button" class="wall-tile tile-specimen tile-s7" data-preset="solid-dark" aria-label="Load Solid Dark preset into builder">
+          <div class="specimen-stage stage-gh-dark" data-specimen="solid-dark-streak"></div>
+          <div class="tile-meta">
+            <span>05 / Solid dark</span>
+            <span>solid-dark</span>
+          </div>
+        </button>
+
+        <button type="button" class="wall-tile tile-specimen tile-s8" data-preset="solid-light" aria-label="Load Solid Light link card preset into builder">
+          <div class="specimen-stage stage-gh-light" data-specimen="solid-light-link"></div>
+          <div class="tile-meta">
+            <span>06 / Clickable links</span>
+            <span>solid-light</span>
+          </div>
+        </button>
+      </div>
+    </section>
+
+    <section id="builder" class="builder-section" aria-labelledby="builder-heading">
+      <div class="section-head">
+        <div>
+          <p class="section-code">WORKBENCH / 01</p>
+          <h2 id="builder-heading">Build your profile cards</h2>
+        </div>
+        <div class="section-head-actions">
+          <button type="button" id="open-import-btn" class="ctrl-btn">Import JSON</button>
+          <button type="button" id="reset-default-btn" class="ctrl-btn">Reset starter</button>
+        </div>
+      </div>
+
+      <div id="status-banner" class="status-banner" role="status" aria-live="polite" hidden></div>
+      <div id="error-banner" class="error-banner" role="alert" hidden></div>
+
+      <div class="builder-grid">
+        <div class="editor-column">
+          <div class="panel-block">
+            <h3 class="panel-title">1. Theme and frame</h3>
+
+            <fieldset class="theme-fieldset">
+              <legend class="field-label">Preset theme</legend>
+              <div id="theme-picker" class="theme-picker" role="radiogroup" aria-label="Card theme presets"></div>
+            </fieldset>
+
+            <div class="range-row">
+              <div class="field">
+                <label for="card-width" class="field-label">
+                  Card width: <output id="card-width-val" for="card-width">560px</output>
+                </label>
+                <input id="card-width" type="range" min="400" max="640" step="10" value="560">
+              </div>
+
+              <div class="field">
+                <label for="card-radius" class="field-label">
+                  Corner radius: <output id="card-radius-val" for="card-radius">6px</output>
+                </label>
+                <input id="card-radius" type="range" min="0" max="16" step="1" value="6">
+              </div>
+            </div>
+
+            <div class="custom-color-toggle">
+              <label class="checkbox-label" for="custom-colors-toggle">
+                <input type="checkbox" id="custom-colors-toggle">
+                <span>Override theme colors manually</span>
+              </label>
+            </div>
+
+            <div id="custom-colors-panel" class="color-grid" hidden>
+              <div class="color-field">
+                <label for="style-bg" class="field-label">Background</label>
+                <input id="style-bg" type="color" value="#000000">
+              </div>
+              <div class="color-field">
+                <label for="style-stroke" class="field-label">Border</label>
+                <input id="style-stroke" type="color" value="#ffffff">
+              </div>
+              <div class="color-field">
+                <label for="style-text" class="field-label">Text</label>
+                <input id="style-text" type="color" value="#ffffff">
+              </div>
+              <div class="color-field">
+                <label for="style-muted" class="field-label">Muted text</label>
+                <input id="style-muted" type="color" value="#8b949e">
+              </div>
+              <div class="color-field">
+                <label for="style-link" class="field-label">Link color</label>
+                <input id="style-link" type="color" value="#388bfd">
+              </div>
+            </div>
+          </div>
+
+          <div class="panel-block">
+            <div class="panel-head-row">
+              <h3 class="panel-title">2. Cards in your README</h3>
+              <span id="card-count-label" class="mono-meta">4 cards</span>
+            </div>
+
+            <div class="add-card-bar" aria-label="Add card type">
+              <button type="button" class="add-btn" data-add-card="typing">+ Typing</button>
+              <button type="button" class="add-btn" data-add-card="info">+ Info box</button>
+              <button type="button" class="add-btn" data-add-card="streak">+ Streak</button>
+              <button type="button" class="add-btn" data-add-card="link">+ Link row</button>
+            </div>
+
+            <div id="cards-editor-list" class="cards-editor-list"></div>
+
+            <div id="empty-cards-state" class="empty-state" hidden>
+              <p class="empty-title">No cards in your profile yet.</p>
+              <p class="empty-desc">Use the buttons above to add a typing banner, info box, streak card, or link row, or restore the starter set.</p>
+              <button type="button" id="restore-from-empty-btn" class="btn-primary">Restore starter cards</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="preview-column">
+          <div class="preview-sticky">
+            <div class="panel-block preview-panel">
+              <div class="panel-head-row">
+                <h3 class="panel-title">Live GitHub README preview</h3>
+                <div class="backdrop-switch" role="group" aria-label="Preview backdrop">
+                  <button type="button" class="mini-tab is-active" data-backdrop="dark" aria-pressed="true">GitHub Dark</button>
+                  <button type="button" class="mini-tab" data-backdrop="light" aria-pressed="false">GitHub Light</button>
+                </div>
+              </div>
+
+              <div id="live-preview-stage" class="live-preview-stage backdrop-dark" aria-label="Rendered SVG card stack"></div>
+
+              <p class="preview-footnote">
+                Streak numbers shown here are sample placeholders. When run through GitHub Actions, termcard reads your real GitHub contribution calendar.
+              </p>
+            </div>
+
+            <div class="panel-block export-panel">
+              <div class="export-tabs" role="tablist" aria-label="Export files">
+                <button type="button" role="tab" id="tab-json" class="export-tab is-active" aria-selected="true" aria-controls="panel-json">termcard.json</button>
+                <button type="button" role="tab" id="tab-yaml" class="export-tab" aria-selected="false" aria-controls="panel-yaml">termcard.yml</button>
+                <button type="button" role="tab" id="tab-svg" class="export-tab" aria-selected="false" aria-controls="panel-svg">SVGs &amp; README</button>
+              </div>
+
+              <div id="panel-json" class="export-body" role="tabpanel" aria-labelledby="tab-json">
+                <div class="export-actions">
+                  <button type="button" id="copy-json-btn" class="btn-primary">Copy termcard.json</button>
+                  <button type="button" id="download-json-btn" class="ctrl-btn">Download file</button>
+                </div>
+                <pre class="code-output"><code id="output-json"></code></pre>
+              </div>
+
+              <div id="panel-yaml" class="export-body" role="tabpanel" aria-labelledby="tab-yaml" hidden>
+                <div class="yaml-option">
+                  <label class="checkbox-label" for="private-pat-toggle">
+                    <input type="checkbox" id="private-pat-toggle">
+                    <span>Include private contributions (uses <code>secrets.STREAK_TOKEN</code> instead of <code>GITHUB_TOKEN</code>)</span>
+                  </label>
+                </div>
+                <div class="export-actions">
+                  <button type="button" id="copy-yaml-btn" class="btn-primary">Copy termcard.yml</button>
+                  <button type="button" id="download-yaml-btn" class="ctrl-btn">Download file</button>
+                </div>
+                <pre class="code-output"><code id="output-yaml"></code></pre>
+              </div>
+
+              <div id="panel-svg" class="export-body" role="tabpanel" aria-labelledby="tab-svg" hidden>
+                <p class="export-hint">Add these two comment lines anywhere in your profile <code>README.md</code> so the Action inserts your cards automatically:</p>
+                <div class="export-actions">
+                  <button type="button" id="copy-markers-btn" class="btn-primary">Copy README markers</button>
+                </div>
+                <pre class="code-output code-output-short"><code id="output-markers"></code></pre>
+
+                <p class="export-hint">Or download static SVG files directly without using GitHub Actions:</p>
+                <div id="svg-download-list" class="svg-download-list"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="setup" class="setup-section" aria-labelledby="setup-heading">
+      <div class="section-head">
+        <div>
+          <p class="section-code">NO TERMINAL NEEDED / 02</p>
+          <h2 id="setup-heading">Add to GitHub in 4 browser steps</h2>
+        </div>
+      </div>
+
+      <ol class="setup-steps">
+        <li class="setup-step">
+          <span class="step-num">01</span>
+          <h3>Open your profile repo</h3>
+          <p>Go to <code>github.com/username/username</code> (create a new public repo with the exact same name as your GitHub username if you do not have one yet).</p>
+        </li>
+        <li class="setup-step">
+          <span class="step-num">02</span>
+          <h3>Add <code>termcard.json</code></h3>
+          <p>Click <strong>Add file</strong> then <strong>Create new file</strong>, name it <code>termcard.json</code>, paste the config from the builder above, and commit.</p>
+        </li>
+        <li class="setup-step">
+          <span class="step-num">03</span>
+          <h3>Add workflow &amp; markers</h3>
+          <p>Create <code>.github/workflows/termcard.yml</code> with the YAML from the second tab, then paste the two <code>TERMCARD</code> comment lines into <code>README.md</code>.</p>
+        </li>
+        <li class="setup-step">
+          <span class="step-num">04</span>
+          <h3>Run the Action once</h3>
+          <p>Open the <strong>Actions</strong> tab in your repo, select <strong>Update termcard</strong>, and click <strong>Run workflow</strong>. Your SVGs update automatically every day after that.</p>
+        </li>
+      </ol>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <div class="footer-brand">
+        <span class="brand-name">termcard</span>
+        <span class="brand-by">by bagasadh</span>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/bagasadh/termcard" target="_blank" rel="noopener noreferrer">Source code</a>
+        <a href="https://github.com/marketplace/actions/termcard-profile-svg-generator" target="_blank" rel="noopener noreferrer">GitHub Marketplace</a>
+        <a href="https://github.com/bagasadh/termcard/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">MIT License</a>
+      </div>
+    </div>
+  </footer>
+
+  <dialog id="import-dialog" class="modal-dialog" aria-labelledby="import-dialog-title">
+    <div class="modal-box">
+      <div class="modal-head">
+        <h3 id="import-dialog-title">Import existing termcard.json</h3>
+        <button type="button" id="close-import-btn" class="ctrl-btn" aria-label="Close import dialog">Close</button>
+      </div>
+      <label for="import-textarea" class="field-label">Paste valid JSON from a previous termcard.json file</label>
+      <textarea id="import-textarea" class="import-textarea" rows="10" placeholder='{"theme":"dashed-dark","cards":[...]}'></textarea>
+      <p id="import-error" class="inline-error" role="alert" hidden></p>
+      <div class="modal-actions">
+        <button type="button" id="cancel-import-btn" class="ctrl-btn">Cancel</button>
+        <button type="button" id="apply-import-btn" class="btn-primary">Load into builder</button>
+      </div>
+    </div>
+  </dialog>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

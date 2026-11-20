@@ -1,0 +1,461 @@
+// Mirrors termcard.py so browser previews match GitHub Action SVG output.
+
+export const DEFAULT_FONT =
+  "JetBrains Mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+
+export const THEMES = {
+  "dashed-dark": {
+    label: "Dashed Dark",
+    bg: "#000000",
+    bg_opacity: "0.5",
+    stroke: "#ffffff",
+    outline: "#24292f",
+    outline_opacity: "0.8",
+    dasharray: "9.5 6",
+    outline_dasharray: "11.5 4",
+    text: "#ffffff",
+    muted: "#8b949e",
+    link: "#388bfd",
+  },
+  "dashed-light": {
+    label: "Dashed Light",
+    bg: "#ffffff",
+    bg_opacity: "0.85",
+    stroke: "#24292f",
+    outline: "#d0d7de",
+    outline_opacity: "0.9",
+    dasharray: "9.5 6",
+    outline_dasharray: "11.5 4",
+    text: "#1f2328",
+    muted: "#57606a",
+    link: "#0969da",
+  },
+  "solid-dark": {
+    label: "Solid Dark",
+    bg: "#0d1117",
+    bg_opacity: "0.92",
+    stroke: "#30363d",
+    outline: "",
+    outline_opacity: "0",
+    dasharray: "",
+    outline_dasharray: "",
+    text: "#e6edf3",
+    muted: "#8b949e",
+    link: "#58a6ff",
+  },
+  "solid-light": {
+    label: "Solid Light",
+    bg: "#ffffff",
+    bg_opacity: "1",
+    stroke: "#d0d7de",
+    outline: "",
+    outline_opacity: "0",
+    dasharray: "",
+    outline_dasharray: "",
+    text: "#1f2328",
+    muted: "#656d76",
+    link: "#0969da",
+  },
+  "terminal-green": {
+    label: "Terminal Green",
+    bg: "#040d07",
+    bg_opacity: "0.88",
+    stroke: "#3fb950",
+    outline: "#0f2916",
+    outline_opacity: "0.85",
+    dasharray: "9.5 6",
+    outline_dasharray: "11.5 4",
+    text: "#aff5b4",
+    muted: "#56d364",
+    link: "#7ee787",
+  },
+};
+
+export function escapeXml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+export function resolveTheme(config) {
+  const base = { ...(THEMES[config.theme] || THEMES["dashed-dark"]) };
+  base.width = clampInt(config.width, 360, 680, 560);
+  base.radius = clampInt(config.radius, 0, 20, 6);
+  base.font = config.font || DEFAULT_FONT;
+  if (config.style) {
+    for (const [key, val] of Object.entries(config.style)) {
+      if (val !== undefined && val !== null && val !== "") {
+        base[key] = val;
+      }
+    }
+  }
+  return base;
+}
+
+function clampInt(val, min, max, fallback) {
+  const n = Number.parseInt(val, 10);
+  if (Number.isNaN(n)) return fallback;
+  return Math.max(min, Math.min(max, n));
+}
+
+function dashAttr(val) {
+  return val ? ` stroke-dasharray="${escapeXml(val)}"` : "";
+}
+
+function renderBox(w, h, t) {
+  const rx = t.radius;
+  const innerW = w - 2;
+  const parts = [];
+  if (t.outline) {
+    const outDash = t.outline_dasharray
+      ? `;stroke-dasharray:${t.outline_dasharray};stroke-dashoffset:1`
+      : "";
+    parts.push(
+      `<rect x="1" y="1" width="${innerW}" height="${h}" rx="${rx}" fill="none"` +
+        ` style="stroke:${t.outline};stroke-opacity:${t.outline_opacity};stroke-width:3.5${outDash}"/>`
+    );
+  }
+  parts.push(
+    `<rect x="1" y="1" width="${innerW}" height="${h}" rx="${rx}"` +
+      ` fill="${t.bg}" fill-opacity="${t.bg_opacity}"` +
+      ` stroke="${t.stroke}" stroke-width="1.5"${dashAttr(t.dasharray)}/>`
+  );
+  return parts.join("");
+}
+
+function renderDivider(x1, y1, x2, y2, t) {
+  const parts = [];
+  if (t.outline) {
+    const outDash = t.outline_dasharray
+      ? `;stroke-dasharray:${t.outline_dasharray};stroke-dashoffset:1`
+      : "";
+    parts.push(
+      `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"` +
+        ` style="stroke:${t.outline};stroke-opacity:${t.outline_opacity};stroke-width:3.5${outDash}"/>`
+    );
+  }
+  parts.push(
+    `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"` +
+      ` stroke="${t.stroke}" stroke-width="1.5"${dashAttr(t.dasharray)}/>`
+  );
+  return parts.join("");
+}
+
+function wrapSvg(w, h, body, t, fontSize = 14, extraStyle = "", extraH = 16) {
+  const svgW = w + 6;
+  const svgH = h + extraH;
+  const styleTag = extraStyle ? `<style>${extraStyle}</style>` : "";
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${svgW}" height="${svgH}"` +
+    ` viewBox="-3 -3 ${svgW} ${svgH}">${styleTag}` +
+    `<g font-family="${escapeXml(t.font)}" font-size="${fontSize}" fill="${t.text}">` +
+    `${body}</g></svg>\n`
+  );
+}
+
+export function renderTyping(card, t, { paused = false } = {}) {
+  const w = clampInt(card.width, 360, 680, t.width);
+  const h = 68;
+  const promptTop = card.prompt_top ?? `┌ ${card.user || "your-username"}`;
+  const promptBottom = card.prompt_bottom ?? "└›";
+  const rawWords = Array.isArray(card.words)
+    ? card.words
+    : String(card.words || "Hi, fastfetch").split(",");
+  const words = rawWords.map((s) => String(s).trim()).filter(Boolean);
+  if (!words.length) words.push("Hi");
+  const duration = Math.max(2, Number(card.duration) || Math.max(6, words.length * 4));
+  const charW = 8.4;
+  const startX = 24 + (promptBottom.length + 1) * charW;
+
+  if (paused) {
+    const first = words[0];
+    const staticChars = [...first]
+      .map((ch, i) => `<text x="${(startX + i * charW).toFixed(1)}" y="54">${escapeXml(ch)}</text>`)
+      .join("");
+    const cursorX = (startX + first.length * charW).toFixed(1);
+    const body =
+      renderBox(w, h, t) +
+      `<text x="24" y="30">${escapeXml(promptTop)}</text>` +
+      `<text x="24" y="54">${escapeXml(promptBottom)}</text>` +
+      staticChars +
+      `<rect fill="${t.text}" x="${cursorX}" y="41" width="1.5" height="16"/>`;
+    return wrapSvg(w, h, body, t, 14);
+  }
+
+  const timeline = [];
+  const cursorSpans = new Map();
+  let step = 0;
+
+  const addSpan = (col, span) => {
+    if (!cursorSpans.has(col)) cursorSpans.set(col, []);
+    cursorSpans.get(col).push(span);
+  };
+
+  words.forEach((word, wIdx) => {
+    step += 2;
+    const typeStarts = [];
+    for (let c = 0; c < word.length; c += 1) {
+      addSpan(c, [step, step + 1, false]);
+      step += 1;
+      typeStarts.push(step);
+    }
+    const holdEnd = step + 8;
+    addSpan(word.length, [step, holdEnd, true]);
+    step = holdEnd;
+    for (let c = word.length - 1; c >= 0; c -= 1) {
+      const delAt = step;
+      timeline.push([wIdx, c, typeStarts[c], delAt]);
+      addSpan(c, [delAt, delAt + 1, false]);
+      step += 1;
+    }
+    addSpan(0, [step, step + 2, true]);
+    step += 2;
+  });
+
+  const total = Math.max(step, 1);
+  const keyframes = [];
+  const texts = [];
+  timeline.forEach(([wIdx, cIdx, sOn, sOff], idx) => {
+    const pOn = ((sOn / total) * 100).toFixed(2);
+    const pOff = ((sOff / total) * 100).toFixed(2);
+    keyframes.push(`@keyframes l${idx}{0%{opacity:0}${pOn}%{opacity:1}${pOff}%{opacity:0}}`);
+    const ch = escapeXml(words[wIdx][cIdx]);
+    const x = (startX + cIdx * charW).toFixed(1);
+    texts.push(
+      `<text x="${x}" y="54" opacity="0" style="animation:l${idx} ${duration}s step-end infinite">${ch}</text>`
+    );
+  });
+
+  const cursors = [];
+  const sortedCols = [...cursorSpans.keys()].sort((a, b) => a - b);
+  for (const col of sortedCols) {
+    const stops = ["0%{opacity:0}"];
+    for (const [sStart, sEnd, blink] of cursorSpans.get(col)) {
+      if (blink && sEnd - sStart >= 2) {
+        let cur = sStart;
+        let visible = true;
+        while (cur < sEnd) {
+          stops.push(`${((cur / total) * 100).toFixed(2)}%{opacity:${visible ? 1 : 0}}`);
+          visible = !visible;
+          cur += 2;
+        }
+        stops.push(`${((sEnd / total) * 100).toFixed(2)}%{opacity:0}`);
+      } else {
+        stops.push(`${((sStart / total) * 100).toFixed(2)}%{opacity:1}`);
+        stops.push(`${((sEnd / total) * 100).toFixed(2)}%{opacity:0}`);
+      }
+    }
+    keyframes.push(`@keyframes c${col}{${stops.join("")}}`);
+    const x = (startX + col * charW).toFixed(1);
+    cursors.push(
+      `<rect fill="${t.text}" x="${x}" y="41" width="1.5" height="16" opacity="0"` +
+        ` style="animation:c${col} ${duration}s step-end infinite"/>`
+    );
+  }
+
+  const reducedMotionRule =
+    "@media (prefers-reduced-motion: reduce){text,rect{animation:none !important}}";
+
+  const body =
+    renderBox(w, h, t) +
+    `<text x="24" y="30">${escapeXml(promptTop)}</text>` +
+    `<text x="24" y="54">${escapeXml(promptBottom)}</text>` +
+    texts.join("") +
+    cursors.join("");
+
+  return wrapSvg(w, h, body, t, 14, keyframes.join("") + reducedMotionRule);
+}
+
+export function renderInfo(card, t) {
+  const w = clampInt(card.width, 360, 680, t.width);
+  const sections =
+    Array.isArray(card.sections) && card.sections.length ? card.sections : [[["Host", "Your Name"]]];
+
+  let y = 30;
+  const elements = [];
+  sections.forEach((rows, sIdx) => {
+    if (sIdx > 0) {
+      const divY = y - 9;
+      elements.push(renderDivider(1, divY, w - 1, divY, t));
+      y += 12;
+    }
+    for (const row of rows) {
+      const label = Array.isArray(row) ? row[0] : row.label;
+      const value = Array.isArray(row) ? row[1] : row.value;
+      elements.push(`<text x="24" y="${y}">${escapeXml(label)}</text>`);
+      elements.push(`<text x="${w - 24}" y="${y}" text-anchor="end">${escapeXml(value)}</text>`);
+      y += 24;
+    }
+  });
+
+  const h = Math.max(44, y - 10);
+  return wrapSvg(w, h, renderBox(w, h, t) + elements.join(""), t, 14);
+}
+
+export function renderLink(card, t) {
+  const w = clampInt(card.width, 360, 680, t.width);
+  const h = 44;
+  const body =
+    renderBox(w, h, t) +
+    `<text x="24" y="28">${escapeXml(card.label || "Link")}</text>` +
+    `<text x="${w - 24}" y="28" text-anchor="end" fill="${t.link}" text-decoration="underline">` +
+    `${escapeXml(card.value || "example.com")}</text>`;
+  return wrapSvg(w, h, body, t, 14);
+}
+
+export function renderStreak(card, t) {
+  const w = clampInt(card.width, 360, 680, t.width);
+  const h = 170;
+  const mid = w / 2;
+  const leftCx = w / 4;
+  const rightCx = (w * 3) / 4;
+
+  const title = escapeXml(card.title || "Streak");
+  const curLabel = escapeXml(card.current_label || "Current streak");
+  const bestLabel = escapeXml(card.longest_label || "Longest streak");
+  const unit = escapeXml(card.unit || "days");
+
+  // Browser preview uses sample values; live values come from GitHub Actions.
+  const curDays = clampInt(card.preview_current, 0, 9999, 7);
+  const bestDays = Math.max(curDays, clampInt(card.preview_longest, 0, 9999, 14));
+  const curRange = card.preview_current_range || "Sample preview";
+  const bestRange = card.preview_longest_range || "Live via Action";
+
+  const parts = [
+    renderBox(w, h, t),
+    `<text x="${mid}" y="30" text-anchor="middle">${title}</text>`,
+    renderDivider(1, 44, w - 1, 44, t),
+    `<text x="${leftCx}" y="66" text-anchor="middle">${curLabel}</text>`,
+    `<text x="${rightCx}" y="66" text-anchor="middle">${bestLabel}</text>`,
+    renderDivider(1, 78, w - 1, 78, t),
+    renderDivider(mid, 44, mid, h + 1, t),
+  ];
+
+  for (const [cx, count, range] of [
+    [leftCx, curDays, curRange],
+    [rightCx, bestDays, bestRange],
+  ]) {
+    parts.push(
+      `<text x="${cx}" y="124" text-anchor="middle" font-size="34" font-weight="bold">${count}</text>`
+    );
+    parts.push(`<text x="${cx}" y="146" text-anchor="middle">${unit}</text>`);
+    parts.push(
+      `<text x="${cx}" y="164" text-anchor="middle" font-size="12" fill="${t.muted}">${escapeXml(range)}</text>`
+    );
+  }
+
+  return wrapSvg(w, h, parts.join(""), t, 15, "", 36);
+}
+
+export function renderCard(card, theme, opts = {}) {
+  switch (card.type) {
+    case "typing":
+      return renderTyping(card, theme, opts);
+    case "info":
+      return renderInfo(card, theme);
+    case "link":
+      return renderLink(card, theme);
+    case "streak":
+      return renderStreak(card, theme);
+    default:
+      return "";
+  }
+}
+
+export function buildExportConfig(state) {
+  const out = {
+    theme: state.theme,
+    width: clampInt(state.width, 360, 680, 560),
+    radius: clampInt(state.radius, 0, 20, 6),
+  };
+
+  if (state.useCustomColors && state.style) {
+    const cleanStyle = {};
+    for (const [k, v] of Object.entries(state.style)) {
+      if (v !== undefined && v !== null && String(v).trim() !== "") {
+        cleanStyle[k] = v;
+      }
+    }
+    if (Object.keys(cleanStyle).length) out.style = cleanStyle;
+  }
+
+  out.cards = state.cards.map((card, idx) => {
+    const output = (card.output || `${card.type}-${idx + 1}.svg`).trim();
+    if (card.type === "typing") {
+      return {
+        type: "typing",
+        output,
+        prompt_top: card.prompt_top,
+        prompt_bottom: card.prompt_bottom,
+        words: card.words.map((w) => w.trim()).filter(Boolean),
+        duration: Number(card.duration) || 8,
+        alt: card.alt || "Typing banner",
+      };
+    }
+    if (card.type === "info") {
+      return {
+        type: "info",
+        output,
+        alt: card.alt || "Profile info",
+        sections: card.sections.map((sec) => sec.map(([k, v]) => [k, v])),
+      };
+    }
+    if (card.type === "streak") {
+      return {
+        type: "streak",
+        output,
+        user: (card.user || "your-username").trim(),
+        timezone_offset: Number(card.timezone_offset) || 0,
+        title: card.title || "Streak",
+        current_label: card.current_label || "Current streak",
+        longest_label: card.longest_label || "Longest streak",
+        alt: card.alt || "GitHub streak",
+      };
+    }
+    return {
+      type: "link",
+      output,
+      label: card.label || "Email",
+      value: card.value || "you@example.com",
+      url: card.url || "",
+      alt: card.alt || card.label || "Link",
+    };
+  });
+
+  return out;
+}
+
+export function buildWorkflowYaml({ includePrivate = false, outputDir = "assets" } = {}) {
+  const tokenExpr = includePrivate ? "${{ secrets.STREAK_TOKEN }}" : "${{ secrets.GITHUB_TOKEN }}";
+  return `name: Update termcard
+
+on:
+  push:
+    paths:
+      - "termcard.json"
+  schedule:
+    - cron: "0 17 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: bagasadh/termcard@v1
+        with:
+          config: termcard.json
+          output_dir: ${outputDir}
+          readme: README.md
+          token: ${tokenExpr}
+`;
+}
+
+export function buildReadmeMarkers() {
+  return `<!-- TERMCARD:START -->\n<!-- Cards will be inserted here automatically by bagasadh/termcard@v1 -->\n<!-- TERMCARD:END -->\n`;
+}
