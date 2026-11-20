@@ -126,6 +126,71 @@ class TestTermcard(unittest.TestCase):
             else:
                 os.environ["GITHUB_REPOSITORY_OWNER"] = old
 
+    def test_render_typing_reduced_motion_shows_first_word(self) -> None:
+        t = termcard.resolve_theme({"theme": "dashed-dark"})
+        svg = termcard.render_typing({"words": ["Hi", "fastfetch"], "duration": 1}, t)
+        root = self.assertValidSvg(svg)
+        self.assertIn("@media (prefers-reduced-motion: reduce){text,rect{animation:none !important}.r{opacity:1 !important}}", svg)
+        self.assertIn("2s step-end infinite", svg)
+        r_texts = [el.text for el in root.iter() if el.tag.endswith("text") and el.attrib.get("class") == "r"]
+        self.assertEqual(sorted(r_texts), ["H", "i"])
+        r_rects = [el for el in root.iter() if el.tag.endswith("rect") and el.attrib.get("class") == "r"]
+        self.assertEqual(len(r_rects), 1)
+
+    def test_resolve_theme_clamping_and_style_escaping(self) -> None:
+        t = termcard.resolve_theme(
+            {
+                "theme": "dashed-dark",
+                "width": 100,
+                "radius": 99,
+                "style": {
+                    "bg": '#111" onclick="x',
+                    "stroke": "#fff<bad>",
+                    "text": "#eee",
+                    "link": '#09f"',
+                },
+            }
+        )
+        self.assertEqual(t["width"], 360)
+        self.assertEqual(t["radius"], 20)
+        svg = termcard.render_link({"label": "Site", "value": "example.com"}, t)
+        self.assertValidSvg(svg)
+        self.assertIn("&quot;", svg)
+        self.assertIn("&lt;bad&gt;", svg)
+
+    def test_update_readme_handles_backslashes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            readme_path = Path(tmp) / "README.md"
+            readme_path.write_text("<!-- TERMCARD:START -->\n<!-- TERMCARD:END -->\n", encoding="utf-8")
+            ok = termcard.update_readme(readme_path, [("assets/t.svg", "https://example.com", r"dev\1\ops", 560)])
+            self.assertTrue(ok)
+            content = readme_path.read_text(encoding="utf-8")
+            self.assertIn(r'alt="dev\1\ops"', content)
+
+    def test_render_streak_integer_divider_coords(self) -> None:
+        t = termcard.resolve_theme({"theme": "dashed-dark", "width": 560})
+        svg = termcard.render_streak(
+            {"demo_days": {"2026-11-08": 1, "2026-11-09": 2}},
+            t,
+            token="",
+        )
+        self.assertValidSvg(svg)
+        self.assertIn('x1="280"', svg)
+        self.assertNotIn('x1="280.0"', svg)
+
+    def test_examples_preview_matches_generator(self) -> None:
+        repo_root = Path(__file__).resolve().parent.parent
+        cfg_path = repo_root / "examples" / "termcard.json"
+        preview_dir = repo_root / "examples" / "preview"
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp)
+            termcard.build_cards(cfg_path, out_dir, skip_streak=True)
+            for name in ("typing.svg", "info.svg", "contact-email.svg"):
+                self.assertEqual(
+                    (preview_dir / name).read_text(encoding="utf-8"),
+                    (out_dir / name).read_text(encoding="utf-8"),
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

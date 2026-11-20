@@ -110,17 +110,17 @@ function renderBox(w, h, t) {
   const parts = [];
   if (t.outline) {
     const outDash = t.outline_dasharray
-      ? `;stroke-dasharray:${t.outline_dasharray};stroke-dashoffset:1`
+      ? `;stroke-dasharray:${escapeXml(t.outline_dasharray)};stroke-dashoffset:1`
       : "";
     parts.push(
       `<rect x="1" y="1" width="${innerW}" height="${h}" rx="${rx}" fill="none"` +
-        ` style="stroke:${t.outline};stroke-opacity:${t.outline_opacity};stroke-width:3.5${outDash}"/>`
+        ` style="stroke:${escapeXml(t.outline)};stroke-opacity:${escapeXml(t.outline_opacity)};stroke-width:3.5${outDash}"/>`
     );
   }
   parts.push(
     `<rect x="1" y="1" width="${innerW}" height="${h}" rx="${rx}"` +
-      ` fill="${t.bg}" fill-opacity="${t.bg_opacity}"` +
-      ` stroke="${t.stroke}" stroke-width="1.5"${dashAttr(t.dasharray)}/>`
+      ` fill="${escapeXml(t.bg)}" fill-opacity="${escapeXml(t.bg_opacity)}"` +
+      ` stroke="${escapeXml(t.stroke)}" stroke-width="1.5"${dashAttr(t.dasharray)}/>`
   );
   return parts.join("");
 }
@@ -129,16 +129,16 @@ function renderDivider(x1, y1, x2, y2, t) {
   const parts = [];
   if (t.outline) {
     const outDash = t.outline_dasharray
-      ? `;stroke-dasharray:${t.outline_dasharray};stroke-dashoffset:1`
+      ? `;stroke-dasharray:${escapeXml(t.outline_dasharray)};stroke-dashoffset:1`
       : "";
     parts.push(
       `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"` +
-        ` style="stroke:${t.outline};stroke-opacity:${t.outline_opacity};stroke-width:3.5${outDash}"/>`
+        ` style="stroke:${escapeXml(t.outline)};stroke-opacity:${escapeXml(t.outline_opacity)};stroke-width:3.5${outDash}"/>`
     );
   }
   parts.push(
     `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"` +
-      ` stroke="${t.stroke}" stroke-width="1.5"${dashAttr(t.dasharray)}/>`
+      ` stroke="${escapeXml(t.stroke)}" stroke-width="1.5"${dashAttr(t.dasharray)}/>`
   );
   return parts.join("");
 }
@@ -150,7 +150,7 @@ function wrapSvg(w, h, body, t, fontSize = 14, extraStyle = "", extraH = 16) {
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" width="${svgW}" height="${svgH}"` +
     ` viewBox="-3 -3 ${svgW} ${svgH}">${styleTag}` +
-    `<g font-family="${escapeXml(t.font)}" font-size="${fontSize}" fill="${t.text}">` +
+    `<g font-family="${escapeXml(t.font)}" font-size="${fontSize}" fill="${escapeXml(t.text)}">` +
     `${body}</g></svg>\n`
   );
 }
@@ -180,7 +180,7 @@ export function renderTyping(card, t, { paused = false } = {}) {
       `<text x="24" y="30">${escapeXml(promptTop)}</text>` +
       `<text x="24" y="54">${escapeXml(promptBottom)}</text>` +
       staticChars +
-      `<rect fill="${t.text}" x="${cursorX}" y="41" width="1.5" height="16"/>`;
+      `<rect fill="${escapeXml(t.text)}" x="${cursorX}" y="41" width="1.5" height="16"/>`;
     return wrapSvg(w, h, body, t, 14);
   }
 
@@ -223,8 +223,9 @@ export function renderTyping(card, t, { paused = false } = {}) {
     keyframes.push(`@keyframes l${idx}{0%{opacity:0}${pOn}%{opacity:1}${pOff}%{opacity:0}}`);
     const ch = escapeXml(words[wIdx][cIdx]);
     const x = (startX + cIdx * charW).toFixed(1);
+    const cls = wIdx === 0 ? ' class="r"' : "";
     texts.push(
-      `<text x="${x}" y="54" opacity="0" style="animation:l${idx} ${duration}s step-end infinite">${ch}</text>`
+      `<text x="${x}" y="54" opacity="0"${cls} style="animation:l${idx} ${duration}s step-end infinite">${ch}</text>`
     );
   });
 
@@ -249,14 +250,15 @@ export function renderTyping(card, t, { paused = false } = {}) {
     }
     keyframes.push(`@keyframes c${col}{${stops.join("")}}`);
     const x = (startX + col * charW).toFixed(1);
+    const cls = col === words[0].length ? ' class="r"' : "";
     cursors.push(
-      `<rect fill="${t.text}" x="${x}" y="41" width="1.5" height="16" opacity="0"` +
+      `<rect fill="${escapeXml(t.text)}" x="${x}" y="41" width="1.5" height="16" opacity="0"${cls}` +
         ` style="animation:c${col} ${duration}s step-end infinite"/>`
     );
   }
 
   const reducedMotionRule =
-    "@media (prefers-reduced-motion: reduce){text,rect{animation:none !important}}";
+    "@media (prefers-reduced-motion: reduce){text,rect{animation:none !important}.r{opacity:1 !important}}";
 
   const body =
     renderBox(w, h, t) +
@@ -271,7 +273,11 @@ export function renderTyping(card, t, { paused = false } = {}) {
 export function renderInfo(card, t) {
   const w = clampInt(card.width, 360, 680, t.width);
   const sections =
-    Array.isArray(card.sections) && card.sections.length ? card.sections : [[["Host", "Your Name"]]];
+    Array.isArray(card.sections) && card.sections.length
+      ? card.sections
+      : Array.isArray(card.rows) && card.rows.length
+        ? [card.rows]
+        : [[]];
 
   let y = 30;
   const elements = [];
@@ -282,8 +288,8 @@ export function renderInfo(card, t) {
       y += 12;
     }
     for (const row of rows) {
-      const label = Array.isArray(row) ? row[0] : row.label;
-      const value = Array.isArray(row) ? row[1] : row.value;
+      const label = Array.isArray(row) ? (row[0] ?? "") : (row.label ?? "");
+      const value = Array.isArray(row) ? (row[1] ?? "") : (row.value ?? "");
       elements.push(`<text x="24" y="${y}">${escapeXml(label)}</text>`);
       elements.push(`<text x="${w - 24}" y="${y}" text-anchor="end">${escapeXml(value)}</text>`);
       y += 24;
@@ -299,9 +305,9 @@ export function renderLink(card, t) {
   const h = 44;
   const body =
     renderBox(w, h, t) +
-    `<text x="24" y="28">${escapeXml(card.label || "Link")}</text>` +
-    `<text x="${w - 24}" y="28" text-anchor="end" fill="${t.link}" text-decoration="underline">` +
-    `${escapeXml(card.value || "example.com")}</text>`;
+    `<text x="24" y="28">${escapeXml(card.label ?? "")}</text>` +
+    `<text x="${w - 24}" y="28" text-anchor="end" fill="${escapeXml(t.link)}" text-decoration="underline">` +
+    `${escapeXml(card.value ?? "")}</text>`;
   return wrapSvg(w, h, body, t, 14);
 }
 
@@ -342,7 +348,7 @@ export function renderStreak(card, t) {
     );
     parts.push(`<text x="${cx}" y="146" text-anchor="middle">${unit}</text>`);
     parts.push(
-      `<text x="${cx}" y="164" text-anchor="middle" font-size="12" fill="${t.muted}">${escapeXml(range)}</text>`
+      `<text x="${cx}" y="164" text-anchor="middle" font-size="12" fill="${escapeXml(t.muted)}">${escapeXml(range)}</text>`
     );
   }
 

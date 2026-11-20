@@ -1,7 +1,5 @@
-// Infinite pan-anywhere field of tiles rendered via WebGL (with 2D canvas fallback).
-// Mirrors reframehk.com's GPU shader architecture: one packed 7-column world wrapped on both axes,
-// inertia fling/wheel/keyboard physics, velocity barrel warp, SDF rounded corners, hover zoom,
-// and pure-math hit testing with zero DOM layout work per frame.
+// Infinite pan-anywhere tile field rendered via WebGL with a 2D canvas fallback.
+// Uses a wrapped 7-column layout, inertia physics, SDF rounded corners, and pure-math hit testing.
 
 const CFG = {
   colWidth: 420,
@@ -487,7 +485,7 @@ function drawTypingCard(ctx, item, x, y, dw, dh, timeSec, paused) {
 
   ctx.save();
   ctx.strokeStyle = t.stroke;
-  ctx.lineWidth = 2;
+  ctx.lineWidth = 1.5;
   ctx.setLineDash(parseDash(t.dasharray));
   ctx.beginPath();
   ctx.roundRect(1, 1, innerW, h, rx);
@@ -524,7 +522,6 @@ const clockFmt = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-
 const clockSecFmt = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" });
 const fmtCoord = (v) => (v < 0 ? "\u2212" : "+") + String(Math.abs(Math.round(v)) % 10000).padStart(4, "0");
 
-// Typography canvas helpers
 const fnt = (weight, size, fam, style = "") => `${style ? `${style} ` : ""}${weight} ${size}px ${fam}`;
 function setSpacing(ctx, px) {
   if ("letterSpacing" in ctx) ctx.letterSpacing = `${px}px`;
@@ -1192,7 +1189,6 @@ export function initCanvas(o) {
     o.onAction(action);
   }
 
-  // Flights
   function flyTo(target, alignTop = false) {
     if (!target) return 0;
     const tx = target.at ? target.at[0] : cam.x + wrapD(target.cx - cam.x, W);
@@ -1283,7 +1279,6 @@ export function initCanvas(o) {
 
   let activeFriction = coarse ? CFG.touchFriction : CFG.friction;
 
-  // Input handlers
   on(stage, "touchmove", (e) => {
     if (!o.isSheetOpen()) e.preventDefault();
   }, { passive: false });

@@ -64,23 +64,14 @@
   box-sizing: border-box;
 }
 
-html {
-  scroll-behavior: smooth;
-  scroll-padding-top: 76px;
-  scroll-padding-bottom: 120px;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  html {
-    scroll-behavior: auto;
-  }
-  *,
-  *::before,
-  *::after {
-    transition-duration: 0.01ms !important;
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-  }
+html,
+body {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 
 body {
@@ -91,6 +82,9 @@ body {
   font-size: clamp(0.95rem, 0.9rem + 0.15vw, 1rem);
   line-height: 1.55;
   -webkit-font-smoothing: antialiased;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
 /* Base-layer affordances: pointer on all enabled controls, not-allowed on disabled. */
@@ -122,14 +116,6 @@ a[href][aria-disabled="true"],
   outline-offset: 2px;
 }
 
-.tile-brand :focus-visible {
-  outline-color: var(--bone-ink);
-}
-
-.tile-accent:focus-visible {
-  outline-color: var(--text);
-}
-
 .skip-link {
   position: absolute;
   left: -9999px;
@@ -150,17 +136,13 @@ a[href][aria-disabled="true"],
 code,
 pre,
 .mono-meta,
-.tile-meta,
 .section-code,
-.step-num,
-.brand-top-meta,
-.accent-index {
+.step-num {
   font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 .ctrl-btn,
 .btn-primary,
-.btn-secondary-bone,
 .add-btn,
 .mini-tab,
 .export-tab {
@@ -211,32 +193,6 @@ pre,
 
 .btn-primary:active {
   transform: translateY(1px);
-}
-
-.btn-secondary-bone {
-  background: transparent;
-  color: var(--bone-ink);
-  border: 1px solid var(--bone-border);
-}
-
-.btn-secondary-bone:hover {
-  background: rgba(128, 128, 128, 0.16);
-}
-
-.tile-brand .btn-primary {
-  background: var(--bone-ink);
-  color: var(--bone);
-  border-color: var(--bone-ink);
-}
-
-.tile-brand .btn-primary:hover {
-  background: #202020;
-  border-color: #202020;
-}
-
-[data-theme="light"] .tile-brand .btn-primary:hover {
-  background: #e0e0e0;
-  border-color: #e0e0e0;
 }
 
 .section-head {
@@ -310,7 +266,7 @@ pre,
 
 .preview-sticky {
   position: sticky;
-  top: 74px;
+  top: 96px;
   display: flex;
   flex-direction: column;
   gap: 18px;
@@ -622,7 +578,6 @@ input[type="range"] {
 }
 
 .text-input,
-.select-input,
 .import-textarea {
   width: 100%;
   min-height: 44px;
@@ -872,7 +827,7 @@ input[type="range"] {
   gap: 8px;
 }
 
-/* Section 3: 4-Step Typographic Browser Setup */
+/* 4-step browser setup */
 .setup-steps {
   list-style: none;
   margin: 0;
@@ -997,23 +952,7 @@ input[type="range"] {
   gap: 8px;
 }
 
-/* ===== Infinite canvas shell (ReframeHK-style field, monochrome) ===== */
-html,
-body {
-  position: fixed;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
-  overscroll-behavior: none;
-}
-
-body {
-  user-select: none;
-  -webkit-user-select: none;
-  -webkit-tap-highlight-color: transparent;
-}
-
+/* Infinite canvas shell */
 .sheet__panel,
 .modal-dialog {
   user-select: text;
@@ -1328,7 +1267,7 @@ body {
   display: contents;
 }
 
-/* ===== Slide-over workbench sheet ===== */
+/* Slide-over workbench sheet */
 .sheet {
   position: fixed;
   inset: 0;
@@ -1429,10 +1368,6 @@ body {
   padding: 20px clamp(14px, 2.5vw, 28px) 8px;
 }
 
-.preview-sticky {
-  top: 96px;
-}
-
 .setup-section {
   margin-top: 40px;
   padding-top: 28px;
@@ -1460,7 +1395,7 @@ body {
   }
 }
 
-/* ===== Responsive: Tablet / Small Laptop (700px - 1059px) ===== */
+/* Responsive: Tablet (700px - 1059px) */
 @media (max-width: 1059px) {
   .hud-desktop-only,
   .mark-by {
@@ -1484,7 +1419,7 @@ body {
   }
 }
 
-/* ===== Responsive: Mobile (< 700px) ===== */
+/* Responsive: Mobile (< 700px) */
 @media (max-width: 699px) {
   .hud {
     padding: 10px 12px;
@@ -1600,7 +1535,6 @@ body {
   }
 
   .text-input,
-  .select-input,
   .import-textarea {
     font-size: 1rem;
   }
@@ -1623,6 +1557,14 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+
   .hint__pad span,
   .sound.is-on .eq i {
     animation: none;

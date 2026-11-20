@@ -78,24 +78,35 @@ THEMES = {
 DEFAULT_FONT = "JetBrains Mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
 
 
+def esc(value: object) -> str:
+    return escape(str(value), {'"': "&quot;"})
+
+
+def clamp_int(val: object, lo: int, hi: int, fallback: int) -> int:
+    try:
+        return max(lo, min(hi, int(val)))  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return fallback
+
+
 def resolve_theme(config: dict) -> dict:
     name = config.get("theme", "dashed-dark")
     base = dict(THEMES.get(name, THEMES["dashed-dark"]))
     base.update(
         {
-            "width": int(config.get("width", 560)),
-            "radius": int(config.get("radius", 6)),
-            "font": config.get("font", DEFAULT_FONT),
+            "width": clamp_int(config.get("width", 560), 360, 680, 560),
+            "radius": clamp_int(config.get("radius", 6), 0, 20, 6),
+            "font": config.get("font") or DEFAULT_FONT,
         }
     )
-    for key, val in config.get("style", {}).items():
-        if val is not None:
+    for key, val in (config.get("style") or {}).items():
+        if val is not None and str(val) != "":
             base[key] = val
     return base
 
 
 def dash_attr(val: str) -> str:
-    return f' stroke-dasharray="{escape(str(val))}"' if val else ""
+    return f' stroke-dasharray="{esc(val)}"' if val else ""
 
 
 def render_box(w: int, h: int, t: dict) -> str:
@@ -103,15 +114,15 @@ def render_box(w: int, h: int, t: dict) -> str:
     inner_w = w - 2
     parts = []
     if t.get("outline"):
-        out_dash = f";stroke-dasharray:{t['outline_dasharray']};stroke-dashoffset:1" if t.get("outline_dasharray") else ""
+        out_dash = f";stroke-dasharray:{esc(t['outline_dasharray'])};stroke-dashoffset:1" if t.get("outline_dasharray") else ""
         parts.append(
             f'<rect x="1" y="1" width="{inner_w}" height="{h}" rx="{rx}" fill="none"'
-            f' style="stroke:{t["outline"]};stroke-opacity:{t["outline_opacity"]};stroke-width:3.5{out_dash}"/>'
+            f' style="stroke:{esc(t["outline"])};stroke-opacity:{esc(t["outline_opacity"])};stroke-width:3.5{out_dash}"/>'
         )
     parts.append(
         f'<rect x="1" y="1" width="{inner_w}" height="{h}" rx="{rx}"'
-        f' fill="{t["bg"]}" fill-opacity="{t["bg_opacity"]}"'
-        f' stroke="{t["stroke"]}" stroke-width="1.5"{dash_attr(t.get("dasharray", ""))}/>'
+        f' fill="{esc(t["bg"])}" fill-opacity="{esc(t["bg_opacity"])}"'
+        f' stroke="{esc(t["stroke"])}" stroke-width="1.5"{dash_attr(t.get("dasharray", ""))}/>'
     )
     return "".join(parts)
 
@@ -119,39 +130,55 @@ def render_box(w: int, h: int, t: dict) -> str:
 def render_divider(x1: float, y1: float, x2: float, y2: float, t: dict) -> str:
     parts = []
     if t.get("outline"):
-        out_dash = f";stroke-dasharray:{t['outline_dasharray']};stroke-dashoffset:1" if t.get("outline_dasharray") else ""
+        out_dash = f";stroke-dasharray:{esc(t['outline_dasharray'])};stroke-dashoffset:1" if t.get("outline_dasharray") else ""
         parts.append(
-            f'<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}"'
-            f' style="stroke:{t["outline"]};stroke-opacity:{t["outline_opacity"]};stroke-width:3.5{out_dash}"/>'
+            f'<line x1="{x1:g}" y1="{y1:g}" x2="{x2:g}" y2="{y2:g}"'
+            f' style="stroke:{esc(t["outline"])};stroke-opacity:{esc(t["outline_opacity"])};stroke-width:3.5{out_dash}"/>'
         )
     parts.append(
-        f'<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}"'
-        f' stroke="{t["stroke"]}" stroke-width="1.5"{dash_attr(t.get("dasharray", ""))}/>'
+        f'<line x1="{x1:g}" y1="{y1:g}" x2="{x2:g}" y2="{y2:g}"'
+        f' stroke="{esc(t["stroke"])}" stroke-width="1.5"{dash_attr(t.get("dasharray", ""))}/>'
     )
     return "".join(parts)
 
 
-def wrap_svg(w: int, h: int, body: str, t: dict, font_size: int = 14, extra_style: str = "") -> str:
+def wrap_svg(
+    w: int,
+    h: int,
+    body: str,
+    t: dict,
+    font_size: int = 14,
+    extra_style: str = "",
+    extra_h: int = 16,
+) -> str:
     svg_w = w + 6
-    svg_h = h + 16
+    svg_h = h + extra_h
     style_tag = f"<style>{extra_style}</style>" if extra_style else ""
     return (
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{svg_w}" height="{svg_h}"'
         f' viewBox="-3 -3 {svg_w} {svg_h}">{style_tag}'
-        f'<g font-family="{escape(t["font"])}" font-size="{font_size}" fill="{t["text"]}">'
+        f'<g font-family="{esc(t["font"])}" font-size="{font_size}" fill="{esc(t["text"])}">'
         f"{body}</g></svg>\n"
     )
 
 
 def render_typing(card: dict, t: dict) -> str:
-    w = int(card.get("width", t["width"]))
+    w = clamp_int(card.get("width"), 360, 680, t["width"])
     h = 68
-    prompt_top = card.get("prompt_top", f"┌ {card.get('user', 'user')}")
-    prompt_bottom = card.get("prompt_bottom", "└›")
-    words = [str(x) for x in card.get("words", ["Hi", "fastfetch"]) if str(x)]
+    prompt_top = card.get("prompt_top") if card.get("prompt_top") is not None else f"┌ {card.get('user') or 'your-username'}"
+    prompt_bottom = card.get("prompt_bottom") if card.get("prompt_bottom") is not None else "└›"
+    raw_words = card.get("words")
+    if isinstance(raw_words, list):
+        words = [str(w).strip() for w in raw_words if w is not None and str(w).strip()]
+    else:
+        words = [w.strip() for w in str(raw_words or "Hi, fastfetch").split(",") if w.strip()]
     if not words:
         words = ["Hi"]
-    duration = float(card.get("duration", max(6, len(words) * 4)))
+    try:
+        dur_val = float(card.get("duration") or 0)
+    except (TypeError, ValueError):
+        dur_val = 0.0
+    duration = max(2.0, dur_val or max(6, len(words) * 4))
     char_w = 8.4
     start_x = 24 + (len(prompt_bottom) + 1) * char_w
 
@@ -184,10 +211,11 @@ def render_typing(card: dict, t: dict) -> str:
         p_on = s_on / total * 100
         p_off = s_off / total * 100
         keyframes.append(f"@keyframes l{idx}{{0%{{opacity:0}}{p_on:.2f}%{{opacity:1}}{p_off:.2f}%{{opacity:0}}}}")
-        ch = escape(words[w_idx][c_idx])
+        ch = esc(words[w_idx][c_idx])
         x = start_x + c_idx * char_w
+        cls = ' class="r"' if w_idx == 0 else ""
         texts.append(
-            f'<text x="{x:.1f}" y="54" opacity="0"'
+            f'<text x="{x:.1f}" y="54" opacity="0"{cls}'
             f' style="animation:l{idx} {duration:g}s step-end infinite">{ch}</text>'
         )
 
@@ -208,23 +236,25 @@ def render_typing(card: dict, t: dict) -> str:
                 stops.append(f"{s_end / total * 100:.2f}%{{opacity:0}}")
         keyframes.append(f"@keyframes c{col}{{{''.join(stops)}}}")
         x = start_x + col * char_w
+        cls = ' class="r"' if col == len(words[0]) else ""
         cursors.append(
-            f'<rect fill="{t["text"]}" x="{x:.1f}" y="41" width="1.5" height="16" opacity="0"'
+            f'<rect fill="{esc(t["text"])}" x="{x:.1f}" y="41" width="1.5" height="16" opacity="0"{cls}'
             f' style="animation:c{col} {duration:g}s step-end infinite"/>'
         )
 
+    reduced_motion_rule = "@media (prefers-reduced-motion: reduce){text,rect{animation:none !important}.r{opacity:1 !important}}"
     body = (
         render_box(w, h, t)
-        + f'<text x="24" y="30">{escape(prompt_top)}</text>'
-        + f'<text x="24" y="54">{escape(prompt_bottom)}</text>'
+        + f'<text x="24" y="30">{esc(prompt_top)}</text>'
+        + f'<text x="24" y="54">{esc(prompt_bottom)}</text>'
         + "".join(texts)
         + "".join(cursors)
     )
-    return wrap_svg(w, h, body, t, font_size=14, extra_style="".join(keyframes))
+    return wrap_svg(w, h, body, t, font_size=14, extra_style="".join(keyframes) + reduced_motion_rule)
 
 
 def render_info(card: dict, t: dict) -> str:
-    w = int(card.get("width", t["width"]))
+    w = clamp_int(card.get("width"), 360, 680, t["width"])
     sections = card.get("sections")
     if not sections and card.get("rows"):
         sections = [card["rows"]]
@@ -239,11 +269,13 @@ def render_info(card: dict, t: dict) -> str:
             y += 12
         for row in rows:
             if isinstance(row, dict):
-                label, value = str(row.get("label", "")), str(row.get("value", ""))
+                label = str(row.get("label") if row.get("label") is not None else "")
+                value = str(row.get("value") if row.get("value") is not None else "")
             else:
-                label, value = str(row[0]), str(row[1])
-            elements.append(f'<text x="24" y="{y}">{escape(label)}</text>')
-            elements.append(f'<text x="{w - 24}" y="{y}" text-anchor="end">{escape(value)}</text>')
+                label = str(row[0] if row[0] is not None else "")
+                value = str(row[1] if row[1] is not None else "")
+            elements.append(f'<text x="24" y="{y}">{esc(label)}</text>')
+            elements.append(f'<text x="{w - 24}" y="{y}" text-anchor="end">{esc(value)}</text>')
             y += 24
 
     h = max(44, y - 10)
@@ -251,14 +283,14 @@ def render_info(card: dict, t: dict) -> str:
 
 
 def render_link(card: dict, t: dict) -> str:
-    w = int(card.get("width", t["width"]))
+    w = clamp_int(card.get("width"), 360, 680, t["width"])
     h = 44
-    label = escape(str(card.get("label", "")))
-    value = escape(str(card.get("value", "")))
+    label = esc(card.get("label") if card.get("label") is not None else "")
+    value = esc(card.get("value") if card.get("value") is not None else "")
     body = (
         render_box(w, h, t)
         + f'<text x="24" y="28">{label}</text>'
-        + f'<text x="{w - 24}" y="28" text-anchor="end" fill="{t["link"]}"'
+        + f'<text x="{w - 24}" y="28" text-anchor="end" fill="{esc(t["link"])}"'
         + f' text-decoration="underline">{value}</text>'
     )
     return wrap_svg(w, h, body, t, font_size=14)
@@ -346,7 +378,7 @@ def resolve_streak_user(card: dict) -> str:
 
 
 def render_streak(card: dict, t: dict, token: str, days_override: dict[str, int] | None = None) -> str:
-    w = int(card.get("width", t["width"]))
+    w = clamp_int(card.get("width"), 360, 680, t["width"])
     h = 170
     mid = w / 2
     left_cx = w / 4
@@ -370,10 +402,10 @@ def render_streak(card: dict, t: dict, token: str, days_override: dict[str, int]
         days = fetch_contribution_days(user, token, today.year)
 
     cur, best = compute_streaks(days, today)
-    title = escape(str(card.get("title", "Streak")))
-    cur_label = escape(str(card.get("current_label", "Current streak")))
-    best_label = escape(str(card.get("longest_label", "Longest streak")))
-    unit = escape(str(card.get("unit", "days")))
+    title = esc(card.get("title") or "Streak")
+    cur_label = esc(card.get("current_label") or "Current streak")
+    best_label = esc(card.get("longest_label") or "Longest streak")
+    unit = esc(card.get("unit") or "days")
 
     parts = [
         render_box(w, h, t),
@@ -388,19 +420,11 @@ def render_streak(card: dict, t: dict, token: str, days_override: dict[str, int]
         parts.append(f'<text x="{cx:g}" y="124" text-anchor="middle" font-size="34" font-weight="bold">{data[0]}</text>')
         parts.append(f'<text x="{cx:g}" y="146" text-anchor="middle">{unit}</text>')
         parts.append(
-            f'<text x="{cx:g}" y="164" text-anchor="middle" font-size="12" fill="{t["muted"]}">'
-            f"{escape(format_range(data[1], data[2]))}</text>"
+            f'<text x="{cx:g}" y="164" text-anchor="middle" font-size="12" fill="{esc(t["muted"])}">'
+            f"{esc(format_range(data[1], data[2]))}</text>"
         )
 
-    svg_w = w + 6
-    svg_h = h + 36
-    return (
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{svg_w}" height="{svg_h}"'
-        f' viewBox="-3 -3 {svg_w} {svg_h}">'
-        f'<g font-family="{escape(t["font"])}" font-size="15" fill="{t["text"]}">'
-        + "".join(parts)
-        + "</g></svg>\n"
-    )
+    return wrap_svg(w, h, "".join(parts), t, font_size=15, extra_h=36)
 
 
 def update_readme(readme_path: Path, entries: list[tuple[str, str | None, str, int]]) -> bool:
@@ -414,8 +438,8 @@ def update_readme(readme_path: Path, entries: list[tuple[str, str | None, str, i
 
     lines = ['<p align="center">']
     for idx, (rel_src, url, alt, width) in enumerate(entries):
-        img = f'<img src="{escape(rel_src)}" width="{width}" alt="{escape(alt)}">'
-        tag = f'<a href="{escape(url)}">{img}</a>' if url else img
+        img = f'<img src="{esc(rel_src)}" width="{width}" alt="{esc(alt)}">'
+        tag = f'<a href="{esc(url)}">{img}</a>' if url else img
         suffix = "<br>" if idx < len(entries) - 1 else ""
         lines.append(f"  {tag}{suffix}")
     lines.append("</p>")
@@ -423,7 +447,7 @@ def update_readme(readme_path: Path, entries: list[tuple[str, str | None, str, i
 
     updated = re.sub(
         rf"{re.escape(start_marker)}.*?{re.escape(end_marker)}",
-        block,
+        lambda _: block,
         text,
         flags=re.DOTALL,
     )
@@ -448,7 +472,7 @@ def build_cards(
         ctype = card.get("type")
         filename = card.get("output") or f"{ctype}-{idx + 1}.svg"
         dest = output_dir / filename
-        card_width = int(card.get("width", theme["width"]))
+        card_width = clamp_int(card.get("width"), 360, 680, theme["width"])
 
         if ctype == "typing":
             svg = render_typing(card, theme)

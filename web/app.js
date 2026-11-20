@@ -2,7 +2,6 @@ import {
   THEMES,
   resolveTheme,
   renderCard,
-  renderTyping,
   renderInfo,
   renderStreak,
   renderLink,
@@ -60,7 +59,7 @@ function createStarterState() {
       {
         id: uid(),
         type: "streak",
-        output: "streak-card.svg",
+        output: "streak.svg",
         user: "your-username",
         timezone_offset: 7,
         title: "Streak",
@@ -760,7 +759,7 @@ function renderCardsEditor() {
           id: `${card.id}-out`,
           labelText: "Output SVG filename",
           value: card.output,
-          placeholder: "streak-card.svg",
+          placeholder: "streak.svg",
           onInput: (v) => {
             card.output = v;
             renderPreviewAndExport();
@@ -1026,7 +1025,7 @@ function addCard(type) {
     state.cards.push({
       id: uid(),
       type: "streak",
-      output: `streak-card${suffix}.svg`,
+      output: `streak${suffix}.svg`,
       user: "your-username",
       timezone_offset: 7,
       title: "Streak",
@@ -1474,7 +1473,6 @@ function wireEvents() {
   });
 }
 
-// Boot
 loadFromStorage();
 updateMotionButton();
 updateSoundButton();
