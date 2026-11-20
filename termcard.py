@@ -1,0 +1,499 @@
+#!/usr/bin/env python3
+"""Generate terminal-styled SVG profile cards from a JSON config."""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import json
+import os
+import re
+import urllib.request
+from pathlib import Path
+from xml.sax.saxutils import escape
+
+THEMES = {
+    "dashed-dark": {
+        "bg": "#000000",
+        "bg_opacity": "0.5",
+        "stroke": "#ffffff",
+        "outline": "#24292f",
+        "outline_opacity": "0.8",
+        "dasharray": "9.5 6",
+        "outline_dasharray": "11.5 4",
+        "text": "#ffffff",
+        "muted": "#8b949e",
+        "link": "#388bfd",
+    },
+    "dashed-light": {
+        "bg": "#ffffff",
+        "bg_opacity": "0.85",
+        "stroke": "#24292f",
+        "outline": "#d0d7de",
+        "outline_opacity": "0.9",
+        "dasharray": "9.5 6",
+        "outline_dasharray": "11.5 4",
+        "text": "#1f2328",
+        "muted": "#57606a",
+        "link": "#0969da",
+    },
+    "solid-dark": {
+        "bg": "#0d1117",
+        "bg_opacity": "0.92",
+        "stroke": "#30363d",
+        "outline": "",
+        "outline_opacity": "0",
+        "dasharray": "",
+        "outline_dasharray": "",
+        "text": "#e6edf3",
+        "muted": "#8b949e",
+        "link": "#58a6ff",
+    },
+    "solid-light": {
+        "bg": "#ffffff",
+        "bg_opacity": "1",
+        "stroke": "#d0d7de",
+        "outline": "",
+        "outline_opacity": "0",
+        "dasharray": "",
+        "outline_dasharray": "",
+        "text": "#1f2328",
+        "muted": "#656d76",
+        "link": "#0969da",
+    },
+    "terminal-green": {
+        "bg": "#040d07",
+        "bg_opacity": "0.88",
+        "stroke": "#3fb950",
+        "outline": "#0f2916",
+        "outline_opacity": "0.85",
+        "dasharray": "9.5 6",
+        "outline_dasharray": "11.5 4",
+        "text": "#aff5b4",
+        "muted": "#56d364",
+        "link": "#7ee787",
+    },
+}
+
+DEFAULT_FONT = "JetBrains Mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
+
+
+def resolve_theme(config: dict) -> dict:
+    name = config.get("theme", "dashed-dark")
+    base = dict(THEMES.get(name, THEMES["dashed-dark"]))
+    base.update(
+        {
+            "width": int(config.get("width", 560)),
+            "radius": int(config.get("radius", 6)),
+            "font": config.get("font", DEFAULT_FONT),
+        }
+    )
+    for key, val in config.get("style", {}).items():
+        if val is not None:
+            base[key] = val
+    return base
+
+
+def dash_attr(val: str) -> str:
+    return f' stroke-dasharray="{escape(str(val))}"' if val else ""
+
+
+def render_box(w: int, h: int, t: dict) -> str:
+    rx = t["radius"]
+    inner_w = w - 2
+    parts = []
+    if t.get("outline"):
+        out_dash = f";stroke-dasharray:{t['outline_dasharray']};stroke-dashoffset:1" if t.get("outline_dasharray") else ""
+        parts.append(
+            f'<rect x="1" y="1" width="{inner_w}" height="{h}" rx="{rx}" fill="none"'
+            f' style="stroke:{t["outline"]};stroke-opacity:{t["outline_opacity"]};stroke-width:3.5{out_dash}"/>'
+        )
+    parts.append(
+        f'<rect x="1" y="1" width="{inner_w}" height="{h}" rx="{rx}"'
+        f' fill="{t["bg"]}" fill-opacity="{t["bg_opacity"]}"'
+        f' stroke="{t["stroke"]}" stroke-width="1.5"{dash_attr(t.get("dasharray", ""))}/>'
+    )
+    return "".join(parts)
+
+
+def render_divider(x1: float, y1: float, x2: float, y2: float, t: dict) -> str:
+    parts = []
+    if t.get("outline"):
+        out_dash = f";stroke-dasharray:{t['outline_dasharray']};stroke-dashoffset:1" if t.get("outline_dasharray") else ""
+        parts.append(
+            f'<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}"'
+            f' style="stroke:{t["outline"]};stroke-opacity:{t["outline_opacity"]};stroke-width:3.5{out_dash}"/>'
+        )
+    parts.append(
+        f'<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}"'
+        f' stroke="{t["stroke"]}" stroke-width="1.5"{dash_attr(t.get("dasharray", ""))}/>'
+    )
+    return "".join(parts)
+
+
+def wrap_svg(w: int, h: int, body: str, t: dict, font_size: int = 14, extra_style: str = "") -> str:
+    svg_w = w + 6
+    svg_h = h + 16
+    style_tag = f"<style>{extra_style}</style>" if extra_style else ""
+    return (
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{svg_w}" height="{svg_h}"'
+        f' viewBox="-3 -3 {svg_w} {svg_h}">{style_tag}'
+        f'<g font-family="{escape(t["font"])}" font-size="{font_size}" fill="{t["text"]}">'
+        f"{body}</g></svg>\n"
+    )
+
+
+def render_typing(card: dict, t: dict) -> str:
+    w = int(card.get("width", t["width"]))
+    h = 68
+    prompt_top = card.get("prompt_top", f"┌ {card.get('user', 'user')}")
+    prompt_bottom = card.get("prompt_bottom", "└›")
+    words = [str(x) for x in card.get("words", ["Hi", "fastfetch"]) if str(x)]
+    if not words:
+        words = ["Hi"]
+    duration = float(card.get("duration", max(6, len(words) * 4)))
+    char_w = 8.4
+    start_x = 24 + (len(prompt_bottom) + 1) * char_w
+
+    # Build step timeline: type each char, hold with blinking cursor, backspace, pause.
+    timeline: list[tuple[int, int, float, float]] = []
+    cursor_spans: dict[int, list[tuple[float, float, bool]]] = {}
+    step = 0
+    for w_idx, word in enumerate(words):
+        step += 2  # initial pause at col 0
+        type_starts = []
+        for c_idx in range(len(word)):
+            cursor_spans.setdefault(c_idx, []).append((step, step + 1, False))
+            step += 1
+            type_starts.append(step)
+        hold_end = step + 8
+        cursor_spans.setdefault(len(word), []).append((step, hold_end, True))
+        step = hold_end
+        for c_idx in range(len(word) - 1, -1, -1):
+            del_at = step
+            timeline.append((w_idx, c_idx, type_starts[c_idx], del_at))
+            cursor_spans.setdefault(c_idx, []).append((del_at, del_at + 1, False))
+            step += 1
+        cursor_spans.setdefault(0, []).append((step, step + 2, True))
+        step += 2
+
+    total = max(step, 1)
+    keyframes: list[str] = []
+    texts: list[str] = []
+    for idx, (w_idx, c_idx, s_on, s_off) in enumerate(timeline):
+        p_on = s_on / total * 100
+        p_off = s_off / total * 100
+        keyframes.append(f"@keyframes l{idx}{{0%{{opacity:0}}{p_on:.2f}%{{opacity:1}}{p_off:.2f}%{{opacity:0}}}}")
+        ch = escape(words[w_idx][c_idx])
+        x = start_x + c_idx * char_w
+        texts.append(
+            f'<text x="{x:.1f}" y="54" opacity="0"'
+            f' style="animation:l{idx} {duration:g}s step-end infinite">{ch}</text>'
+        )
+
+    cursors: list[str] = []
+    for col, spans in sorted(cursor_spans.items()):
+        stops = ["0%{opacity:0}"]
+        for s_start, s_end, blink in spans:
+            if blink and s_end - s_start >= 2:
+                cur_s = s_start
+                visible = True
+                while cur_s < s_end:
+                    stops.append(f"{cur_s / total * 100:.2f}%{{opacity:{1 if visible else 0}}}")
+                    visible = not visible
+                    cur_s += 2
+                stops.append(f"{s_end / total * 100:.2f}%{{opacity:0}}")
+            else:
+                stops.append(f"{s_start / total * 100:.2f}%{{opacity:1}}")
+                stops.append(f"{s_end / total * 100:.2f}%{{opacity:0}}")
+        keyframes.append(f"@keyframes c{col}{{{''.join(stops)}}}")
+        x = start_x + col * char_w
+        cursors.append(
+            f'<rect fill="{t["text"]}" x="{x:.1f}" y="41" width="1.5" height="16" opacity="0"'
+            f' style="animation:c{col} {duration:g}s step-end infinite"/>'
+        )
+
+    body = (
+        render_box(w, h, t)
+        + f'<text x="24" y="30">{escape(prompt_top)}</text>'
+        + f'<text x="24" y="54">{escape(prompt_bottom)}</text>'
+        + "".join(texts)
+        + "".join(cursors)
+    )
+    return wrap_svg(w, h, body, t, font_size=14, extra_style="".join(keyframes))
+
+
+def render_info(card: dict, t: dict) -> str:
+    w = int(card.get("width", t["width"]))
+    sections = card.get("sections")
+    if not sections and card.get("rows"):
+        sections = [card["rows"]]
+    sections = sections or [[]]
+
+    y = 30
+    elements: list[str] = []
+    for s_idx, rows in enumerate(sections):
+        if s_idx > 0:
+            div_y = y - 9
+            elements.append(render_divider(1, div_y, w - 1, div_y, t))
+            y += 12
+        for row in rows:
+            if isinstance(row, dict):
+                label, value = str(row.get("label", "")), str(row.get("value", ""))
+            else:
+                label, value = str(row[0]), str(row[1])
+            elements.append(f'<text x="24" y="{y}">{escape(label)}</text>')
+            elements.append(f'<text x="{w - 24}" y="{y}" text-anchor="end">{escape(value)}</text>')
+            y += 24
+
+    h = max(44, y - 10)
+    return wrap_svg(w, h, render_box(w, h, t) + "".join(elements), t, font_size=14)
+
+
+def render_link(card: dict, t: dict) -> str:
+    w = int(card.get("width", t["width"]))
+    h = 44
+    label = escape(str(card.get("label", "")))
+    value = escape(str(card.get("value", "")))
+    body = (
+        render_box(w, h, t)
+        + f'<text x="24" y="28">{label}</text>'
+        + f'<text x="{w - 24}" y="28" text-anchor="end" fill="{t["link"]}"'
+        + f' text-decoration="underline">{value}</text>'
+    )
+    return wrap_svg(w, h, body, t, font_size=14)
+
+
+def compute_streaks(days: dict[str, int], today: dt.date) -> tuple[tuple[int, dt.date | None, dt.date | None], tuple[int, dt.date | None, dt.date | None]]:
+    dates = sorted(dt.date.fromisoformat(k) for k in days)
+    best: tuple[int, dt.date | None, dt.date | None] = (0, None, None)
+    run = 0
+    start: dt.date | None = None
+    prev: dt.date | None = None
+    for d in dates:
+        if days[d.isoformat()] > 0:
+            if run == 0 or prev is None or (d - prev).days != 1:
+                run, start = 0, d
+            run += 1
+            prev = d
+            if run > best[0]:
+                best = (run, start, d)
+        else:
+            run, prev = 0, None
+
+    cur: tuple[int, dt.date | None, dt.date | None] = (0, None, None)
+    d = today
+    if days.get(d.isoformat(), 0) == 0:
+        d -= dt.timedelta(days=1)
+    end = d
+    n = 0
+    while days.get(d.isoformat(), 0) > 0:
+        n += 1
+        d -= dt.timedelta(days=1)
+    if n:
+        cur = (n, d + dt.timedelta(days=1), end)
+    return cur, best
+
+
+def fetch_contribution_days(user: str, token: str, now_year: int) -> dict[str, int]:
+    def gql(q: str, v: dict) -> dict:
+        req = urllib.request.Request(
+            "https://api.github.com/graphql",
+            data=json.dumps({"query": q, "variables": v}).encode("utf-8"),
+            headers={
+                "Authorization": f"bearer {token}",
+                "Content-Type": "application/json",
+                "User-Agent": "termcard",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+        if payload.get("errors"):
+            raise RuntimeError(f"GitHub GraphQL error: {payload['errors']}")
+        return payload["data"]
+
+    created = int(gql("query($u:String!){user(login:$u){createdAt}}", {"u": user})["user"]["createdAt"][:4])
+    cal_query = (
+        "query($u:String!,$f:DateTime!,$t:DateTime!){"
+        "user(login:$u){contributionsCollection(from:$f,to:$t){"
+        "contributionCalendar{weeks{contributionDays{date contributionCount}}}}}}"
+    )
+    days: dict[str, int] = {}
+    for year in range(created, now_year + 1):
+        cal = gql(
+            cal_query,
+            {"u": user, "f": f"{year}-01-01T00:00:00Z", "t": f"{year}-12-31T23:59:59Z"},
+        )["user"]["contributionsCollection"]["contributionCalendar"]
+        for week in cal["weeks"]:
+            for day in week["contributionDays"]:
+                days[day["date"]] = int(day["contributionCount"])
+    return days
+
+
+def format_range(start: dt.date | None, end: dt.date | None) -> str:
+    if not start or not end:
+        return "-"
+    if start == end:
+        return start.strftime("%b %d")
+    return f"{start.strftime('%b %d')} - {end.strftime('%b %d')}"
+
+
+def render_streak(card: dict, t: dict, token: str, days_override: dict[str, int] | None = None) -> str:
+    w = int(card.get("width", t["width"]))
+    h = 170
+    mid = w / 2
+    left_cx = w / 4
+    right_cx = w * 3 / 4
+
+    tz_offset = int(card.get("timezone_offset", 0))
+    now_local = dt.datetime.now(dt.timezone.utc).astimezone(dt.timezone(dt.timedelta(hours=tz_offset)))
+    today = now_local.date()
+
+    if days_override is not None:
+        days = days_override
+    elif card.get("demo_days"):
+        days = {str(k): int(v) for k, v in card["demo_days"].items()}
+        today = max(dt.date.fromisoformat(k) for k in days)
+    else:
+        user = card.get("user")
+        if not user:
+            raise ValueError("Streak card requires 'user'")
+        if not token:
+            raise ValueError("Streak card requires GITHUB_TOKEN (or pass --skip-streak for offline builds)")
+        days = fetch_contribution_days(user, token, today.year)
+
+    cur, best = compute_streaks(days, today)
+    title = escape(str(card.get("title", "Streak")))
+    cur_label = escape(str(card.get("current_label", "Current streak")))
+    best_label = escape(str(card.get("longest_label", "Longest streak")))
+    unit = escape(str(card.get("unit", "days")))
+
+    parts = [
+        render_box(w, h, t),
+        f'<text x="{mid:g}" y="30" text-anchor="middle">{title}</text>',
+        render_divider(1, 44, w - 1, 44, t),
+        f'<text x="{left_cx:g}" y="66" text-anchor="middle">{cur_label}</text>',
+        f'<text x="{right_cx:g}" y="66" text-anchor="middle">{best_label}</text>',
+        render_divider(1, 78, w - 1, 78, t),
+        render_divider(mid, 44, mid, h + 1, t),
+    ]
+    for cx, data in ((left_cx, cur), (right_cx, best)):
+        parts.append(f'<text x="{cx:g}" y="124" text-anchor="middle" font-size="34" font-weight="bold">{data[0]}</text>')
+        parts.append(f'<text x="{cx:g}" y="146" text-anchor="middle">{unit}</text>')
+        parts.append(
+            f'<text x="{cx:g}" y="164" text-anchor="middle" font-size="12" fill="{t["muted"]}">'
+            f"{escape(format_range(data[1], data[2]))}</text>"
+        )
+
+    svg_w = w + 6
+    svg_h = h + 36
+    return (
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{svg_w}" height="{svg_h}"'
+        f' viewBox="-3 -3 {svg_w} {svg_h}">'
+        f'<g font-family="{escape(t["font"])}" font-size="15" fill="{t["text"]}">'
+        + "".join(parts)
+        + "</g></svg>\n"
+    )
+
+
+def update_readme(readme_path: Path, entries: list[tuple[str, str | None, str, int]]) -> bool:
+    start_marker = "<!-- TERMCARD:START -->"
+    end_marker = "<!-- TERMCARD:END -->"
+    if not readme_path.exists():
+        return False
+    text = readme_path.read_text(encoding="utf-8")
+    if start_marker not in text or end_marker not in text:
+        return False
+
+    lines = ['<p align="center">']
+    for idx, (rel_src, url, alt, width) in enumerate(entries):
+        img = f'<img src="{escape(rel_src)}" width="{width}" alt="{escape(alt)}">'
+        tag = f'<a href="{escape(url)}">{img}</a>' if url else img
+        suffix = "<br>" if idx < len(entries) - 1 else ""
+        lines.append(f"  {tag}{suffix}")
+    lines.append("</p>")
+    block = f"{start_marker}\n" + "\n".join(lines) + f"\n{end_marker}"
+
+    updated = re.sub(
+        rf"{re.escape(start_marker)}.*?{re.escape(end_marker)}",
+        block,
+        text,
+        flags=re.DOTALL,
+    )
+    readme_path.write_text(updated, encoding="utf-8")
+    return True
+
+
+def build_cards(
+    config_path: Path,
+    output_dir: Path,
+    token: str = "",
+    skip_streak: bool = False,
+    readme_path: Path | None = None,
+) -> list[Path]:
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    theme = resolve_theme(config)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    written: list[Path] = []
+    readme_entries: list[tuple[str, str | None, str, int]] = []
+    for idx, card in enumerate(config.get("cards", [])):
+        ctype = card.get("type")
+        filename = card.get("output") or f"{ctype}-{idx + 1}.svg"
+        dest = output_dir / filename
+        card_width = int(card.get("width", theme["width"]))
+
+        if ctype == "typing":
+            svg = render_typing(card, theme)
+            alt = card.get("alt", "Typing banner")
+        elif ctype == "info":
+            svg = render_info(card, theme)
+            alt = card.get("alt", "Profile info")
+        elif ctype == "link":
+            svg = render_link(card, theme)
+            alt = card.get("alt", card.get("label", "Link"))
+        elif ctype == "streak":
+            if skip_streak and not card.get("demo_days"):
+                continue
+            svg = render_streak(card, theme, token)
+            alt = card.get("alt", "GitHub streak")
+        else:
+            raise ValueError(f"Unsupported card type: {ctype}")
+
+        dest.write_text(svg, encoding="utf-8")
+        written.append(dest)
+        rel_src = dest.as_posix()
+        if readme_path:
+            rel_src = os.path.relpath(dest.resolve(), readme_path.resolve().parent).replace(os.sep, "/")
+        readme_entries.append((rel_src, card.get("url"), alt, card_width))
+
+    if readme_path and readme_entries:
+        update_readme(readme_path, readme_entries)
+
+    return written
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Generate terminal-styled SVG cards for GitHub profiles.")
+    parser.add_argument("--config", default="termcard.json", help="Path to termcard JSON config.")
+    parser.add_argument("--out", default="assets", help="Output directory for generated SVGs.")
+    parser.add_argument("--readme", default="", help="Optional README.md to update between TERMCARD markers.")
+    parser.add_argument("--skip-streak", action="store_true", help="Skip live GitHub streak API calls.")
+    args = parser.parse_args()
+
+    token = os.environ.get("GITHUB_TOKEN", "").strip()
+    readme_path = Path(args.readme) if args.readme else None
+    written = build_cards(
+        Path(args.config),
+        Path(args.out),
+        token=token,
+        skip_streak=args.skip_streak,
+        readme_path=readme_path,
+    )
+    for path in written:
+        print(f"Generated {path}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

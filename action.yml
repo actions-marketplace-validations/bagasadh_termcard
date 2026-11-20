@@ -1,0 +1,63 @@
+name: Termcard Profile SVG Generator
+description: Generate terminal-styled SVG profile cards (typing banner, info box, streak card, and links) from a JSON config.
+author: bagasadh
+branding:
+  icon: terminal
+  color: gray-dark
+inputs:
+  config:
+    description: Path to the termcard JSON config file.
+    required: false
+    default: termcard.json
+  output_dir:
+    description: Directory where generated SVG files are saved.
+    required: false
+    default: assets
+  readme:
+    description: Optional README.md path with TERMCARD markers to auto-update.
+    required: false
+    default: ""
+  token:
+    description: GitHub token for the streak card (use a PAT to include private contributions).
+    required: false
+    default: ${{ github.token }}
+  commit:
+    description: Automatically commit and push changed SVG files.
+    required: false
+    default: "true"
+  commit_message:
+    description: Commit message used when commit is true.
+    required: false
+    default: "Update termcard SVGs"
+runs:
+  using: composite
+  steps:
+    - name: Generate SVG cards
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.token }}
+        TC_CONFIG: ${{ inputs.config }}
+        TC_OUT: ${{ inputs.output_dir }}
+        TC_README: ${{ inputs.readme }}
+      run: |
+        args=(--config "$TC_CONFIG" --out "$TC_OUT")
+        if [ -n "$TC_README" ]; then
+          args+=(--readme "$TC_README")
+        fi
+        python3 "${{ github.action_path }}/termcard.py" "${args[@]}"
+
+    - name: Commit updated cards
+      if: inputs.commit == 'true'
+      shell: bash
+      env:
+        TC_OUT: ${{ inputs.output_dir }}
+        TC_README: ${{ inputs.readme }}
+        TC_MSG: ${{ inputs.commit_message }}
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        git add "$TC_OUT"
+        if [ -n "$TC_README" ] && [ -f "$TC_README" ]; then
+          git add "$TC_README"
+        fi
+        git diff --cached --quiet || (git commit -m "$TC_MSG" && git push)
