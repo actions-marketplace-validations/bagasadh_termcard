@@ -96,7 +96,7 @@ const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const easeInOut = (k) => (k < 0.5 ? 2 * k * k : 1 - ((-2 * k + 2) ** 2) / 2);
 const easeOut = (k) => 1 - (1 - k) ** 2;
 
-const VS_SRC = `
+const VS_BODY = `
 attribute vec2 aPos;
 attribute vec2 aUv;
 uniform vec2 uOffset;
@@ -116,8 +116,7 @@ void main() {
 }
 `;
 
-const FS_SRC = `
-precision mediump float;
+const FS_BODY = `
 uniform sampler2D uMap;
 uniform sampler2D uMap2;
 uniform vec2 uSize;
@@ -153,25 +152,32 @@ function createGL(canvasEl) {
   }
   if (!gl) return null;
 
+  const highp = gl.getShaderPrecisionFormat?.(gl.FRAGMENT_SHADER, gl.HIGH_FLOAT)?.precision > 0;
+  const prec = highp ? "precision highp float;\n" : "precision mediump float;\n";
+
   const compile = (type, src) => {
     const sh = gl.createShader(type);
     gl.shaderSource(sh, src);
     gl.compileShader(sh);
     if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+      console.error("termcard shader compile error:", gl.getShaderInfoLog(sh));
       gl.deleteShader(sh);
       return null;
     }
     return sh;
   };
-  const vs = compile(gl.VERTEX_SHADER, VS_SRC);
-  const fs = compile(gl.FRAGMENT_SHADER, FS_SRC);
+  const vs = compile(gl.VERTEX_SHADER, prec + VS_BODY);
+  const fs = compile(gl.FRAGMENT_SHADER, prec + FS_BODY);
   if (!vs || !fs) return null;
 
   const prog = gl.createProgram();
   gl.attachShader(prog, vs);
   gl.attachShader(prog, fs);
   gl.linkProgram(prog);
-  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) return null;
+  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+    console.error("termcard shader link error:", gl.getProgramInfoLog(prog));
+    return null;
+  }
 
   // Build subdivided unit quad (segments x segments) so barrel bend curves smoothly.
   const seg = CFG.segments;
@@ -247,6 +253,7 @@ function createGL(canvasEl) {
   }
 
   function uploadTexture(tex, sourceCanvas) {
+    gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -494,11 +501,17 @@ export function initCanvas(o) {
   const canAim = matchMedia("(any-pointer: fine)").matches;
   o.hint.textContent = coarse ? "SWIPE TO EXPLORE" : "DRAG \u00b7 ARROWS \u00b7 \u21b5 OPEN";
 
-  const canvasEl = document.createElement("canvas");
+  let canvasEl = document.createElement("canvas");
   stage.replaceChildren(canvasEl);
 
   const glCtx = createGL(canvasEl);
-  const ctx2d = glCtx ? null : canvasEl.getContext("2d", { alpha: false });
+  let ctx2d = null;
+  if (!glCtx) {
+    // A canvas whose WebGL context succeeded once cannot return a 2D context, so create a fresh element.
+    canvasEl = document.createElement("canvas");
+    stage.replaceChildren(canvasEl);
+    ctx2d = canvasEl.getContext("2d", { alpha: false });
+  }
 
   let P = PALETTES[o.getTheme?.() === "light" ? "light" : "dark"];
   glCtx?.setClear(P.clear);
