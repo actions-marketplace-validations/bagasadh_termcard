@@ -85,7 +85,7 @@ const STORAGE_KEY = "termcard_builder_v1";
 const GH_USER_RE = /^[a-z\d](?:[a-z\d]|-(?=[a-z\d])){0,38}$/i;
 
 let state = createStarterState();
-let openCardId = state.cards[0]?.id || null;
+let openCardIds = new Set(state.cards[0] ? [state.cards[0].id] : []);
 let typingPaused = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 let previewBackdrop = "dark";
 let pageTheme = "dark";
@@ -308,13 +308,22 @@ function syncColorInputsFromTheme(key) {
   el.styleLink.value = t.link;
 }
 
+function syncCustomColorsDisabled() {
+  const disabled = !state.useCustomColors;
+  el.customColorsPanel.classList.toggle("is-disabled", disabled);
+  el.customColorsPanel.setAttribute("aria-disabled", String(disabled));
+  for (const input of [el.styleBg, el.styleStroke, el.styleText, el.styleMuted, el.styleLink]) {
+    input.disabled = disabled;
+  }
+}
+
 function syncFrameControls() {
   el.widthInput.value = String(state.width);
   el.widthOut.textContent = `${state.width}px`;
   el.radiusInput.value = String(state.radius);
   el.radiusOut.textContent = `${state.radius}px`;
   el.customColorsToggle.checked = Boolean(state.useCustomColors);
-  el.customColorsPanel.hidden = !state.useCustomColors;
+  syncCustomColorsDisabled();
   el.styleBg.value = state.style.bg;
   el.styleStroke.value = state.style.stroke;
   el.styleText.value = state.style.text;
@@ -349,7 +358,7 @@ function renderCardsEditor() {
   el.emptyCardsState.hidden = count > 0;
 
   state.cards.forEach((card, idx) => {
-    const isOpen = card.id === openCardId;
+    const isOpen = openCardIds.has(card.id);
     const bodyId = `body-${card.id}`;
 
     const box = document.createElement("article");
@@ -383,7 +392,11 @@ function renderCardsEditor() {
 
     toggleBtn.append(meta, stateTxt);
     toggleBtn.addEventListener("click", () => {
-      openCardId = isOpen ? null : card.id;
+      if (openCardIds.has(card.id)) {
+        openCardIds.delete(card.id);
+      } else {
+        openCardIds.add(card.id);
+      }
       renderCardsEditor();
     });
 
@@ -421,9 +434,7 @@ function renderCardsEditor() {
     delBtn.setAttribute("aria-label", `Remove ${card.type} card ${idx + 1}`);
     delBtn.addEventListener("click", () => {
       state.cards.splice(idx, 1);
-      if (openCardId === card.id) {
-        openCardId = state.cards[Math.min(idx, state.cards.length - 1)]?.id || null;
-      }
+      openCardIds.delete(card.id);
       renderCardsEditor();
       renderPreviewAndExport();
       showStatus(`Removed ${card.type} card.`);
@@ -831,7 +842,7 @@ function loadFromStorage() {
       },
       cards: saved.state.cards.map((c) => ({ ...c, id: uid() })),
     };
-    openCardId = state.cards[0]?.id || null;
+    openCardIds = new Set(state.cards[0] ? [state.cards[0].id] : []);
     deployUser = typeof saved.deployUser === "string" ? saved.deployUser : "";
     includePrivatePat = Boolean(saved.includePrivatePat);
     previewBackdrop = saved.previewBackdrop === "light" ? "light" : "dark";
@@ -941,7 +952,8 @@ function addCard(type) {
       alt: "GitHub",
     });
   }
-  openCardId = state.cards[state.cards.length - 1]?.id || null;
+  const added = state.cards[state.cards.length - 1];
+  if (added) openCardIds.add(added.id);
   renderCardsEditor();
   renderPreviewAndExport();
   showStatus(`Added ${type} card.`);
@@ -1091,7 +1103,7 @@ function importConfigFromText(rawText) {
     cards: importedCards,
   };
 
-  openCardId = state.cards[0]?.id || null;
+  openCardIds = new Set(state.cards[0] ? [state.cards[0].id] : []);
   syncFrameControls();
   renderThemePicker();
   renderCardsEditor();
@@ -1156,7 +1168,7 @@ function wireEvents() {
 
   el.customColorsToggle.addEventListener("change", (e) => {
     state.useCustomColors = e.target.checked;
-    el.customColorsPanel.hidden = !state.useCustomColors;
+    syncCustomColorsDisabled();
     renderPreviewAndExport();
   });
 
@@ -1184,7 +1196,7 @@ function wireEvents() {
       // Ignore storage errors.
     }
     state = createStarterState();
-    openCardId = state.cards[0]?.id || null;
+    openCardIds = new Set(state.cards[0] ? [state.cards[0].id] : []);
     deployUser = "";
     includePrivatePat = false;
     el.ghDeployUser.value = "";
