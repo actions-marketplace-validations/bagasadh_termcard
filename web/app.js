@@ -199,8 +199,7 @@ function validateState() {
   return errors;
 }
 
-function getSpecimen(key, { staticTyping = false } = {}) {
-  const opts = { paused: staticTyping || typingPaused };
+function getSpecimen(key) {
   if (key === "live") {
     const resolvedTheme = resolveTheme({
       theme: state.theme,
@@ -208,85 +207,137 @@ function getSpecimen(key, { staticTyping = false } = {}) {
       radius: state.radius,
       style: state.useCustomColors ? state.style : undefined,
     });
-    const html = state.cards.length
-      ? state.cards
-          .slice(0, 4)
-          .map((card) => renderCard(card, resolvedTheme, opts))
-          .join("")
-      : '<p class="preview-empty-note">Add cards in the builder to preview your stack here.</p>';
-    return { html, stage: previewBackdrop };
+    const items = state.cards.slice(0, 4).map((card) => {
+      if (card.type === "typing") {
+        return {
+          type: "typing",
+          card: {
+            prompt_top: card.prompt_top,
+            prompt_bottom: card.prompt_bottom,
+            words: Array.isArray(card.words) ? [...card.words] : ["Hi"],
+            duration: card.duration || 8,
+          },
+          theme: resolvedTheme,
+        };
+      }
+      return { type: "svg", svg: renderCard(card, resolvedTheme, { paused: true }) };
+    });
+    return { stage: previewBackdrop, items };
   }
 
   const specimens = {
-    "typing-dark": renderTyping(
-      { prompt_top: "┌ bagasadh", prompt_bottom: "└›", words: ["fastfetch", "Hi"], duration: 8 },
-      resolveTheme({ theme: "dashed-dark", width: 460 }),
-      opts
-    ),
-    "info-dark": renderInfo(
-      {
-        sections: [
-          [
-            ["Host", "Your Name"],
-            ["Role", "Developer"],
-          ],
-          [
-            ["OS", "Arch Linux"],
-            ["WM", "i3 (X11)"],
-          ],
-        ],
-      },
-      resolveTheme({ theme: "dashed-dark", width: 460 })
-    ),
-    "streak-green": renderStreak(
-      {
-        title: "Streak",
-        current_label: "Current streak",
-        longest_label: "Longest streak",
-        preview_current: 13,
-        preview_longest: 13,
-        preview_current_range: "Sample preview",
-        preview_longest_range: "Live via Action",
-      },
-      resolveTheme({ theme: "terminal-green", width: 460 })
-    ),
-    "light-pair":
-      renderTyping(
-        { prompt_top: "┌ studio", prompt_bottom: "$", words: ["build", "ship"], duration: 7 },
-        resolveTheme({ theme: "dashed-light", width: 460 }),
-        opts
-      ) +
-      renderLink(
-        { label: "Email", value: "you@example.com" },
-        resolveTheme({ theme: "dashed-light", width: 460 })
-      ),
-    "solid-dark-streak": renderStreak(
-      {
-        title: "Activity",
-        current_label: "Current streak",
-        longest_label: "Longest streak",
-        preview_current: 9,
-        preview_longest: 21,
-        preview_current_range: "Sample preview",
-        preview_longest_range: "Live via Action",
-      },
-      resolveTheme({ theme: "solid-dark", width: 460 })
-    ),
-    "solid-light-link":
-      renderLink(
-        { label: "Portfolio", value: "your-site.dev" },
-        resolveTheme({ theme: "solid-light", width: 460 })
-      ) +
-      renderLink(
-        { label: "GitHub", value: "@your-username" },
-        resolveTheme({ theme: "solid-light", width: 460 })
-      ),
+    "typing-dark": {
+      stage: "dark",
+      items: [
+        {
+          type: "typing",
+          card: { prompt_top: "┌ bagasadh", prompt_bottom: "└›", words: ["Hi", "fastfetch"], duration: 8 },
+          theme: resolveTheme({ theme: "dashed-dark", width: 460 }),
+        },
+      ],
+    },
+    "info-dark": {
+      stage: "dark",
+      items: [
+        {
+          type: "svg",
+          svg: renderInfo(
+            {
+              sections: [
+                [
+                  ["Host", "Your Name"],
+                  ["Role", "Developer"],
+                ],
+                [
+                  ["OS", "Arch Linux"],
+                  ["WM", "i3 (X11)"],
+                ],
+              ],
+            },
+            resolveTheme({ theme: "dashed-dark", width: 460 })
+          ),
+        },
+      ],
+    },
+    "streak-green": {
+      stage: "dark",
+      items: [
+        {
+          type: "svg",
+          svg: renderStreak(
+            {
+              title: "Streak",
+              current_label: "Current streak",
+              longest_label: "Longest streak",
+              preview_current: 13,
+              preview_longest: 13,
+              preview_current_range: "Sample preview",
+              preview_longest_range: "Live via Action",
+            },
+            resolveTheme({ theme: "terminal-green", width: 460 })
+          ),
+        },
+      ],
+    },
+    "light-pair": {
+      stage: "light",
+      items: [
+        {
+          type: "typing",
+          card: { prompt_top: "┌ studio", prompt_bottom: "$", words: ["build", "ship"], duration: 7 },
+          theme: resolveTheme({ theme: "dashed-light", width: 460 }),
+        },
+        {
+          type: "svg",
+          svg: renderLink(
+            { label: "Email", value: "you@example.com" },
+            resolveTheme({ theme: "dashed-light", width: 460 })
+          ),
+        },
+      ],
+    },
+    "solid-dark-streak": {
+      stage: "dark",
+      items: [
+        {
+          type: "svg",
+          svg: renderStreak(
+            {
+              title: "Activity",
+              current_label: "Current streak",
+              longest_label: "Longest streak",
+              preview_current: 9,
+              preview_longest: 21,
+              preview_current_range: "Sample preview",
+              preview_longest_range: "Live via Action",
+            },
+            resolveTheme({ theme: "solid-dark", width: 460 })
+          ),
+        },
+      ],
+    },
+    "solid-light-link": {
+      stage: "light",
+      items: [
+        {
+          type: "svg",
+          svg: renderLink(
+            { label: "Portfolio", value: "your-site.dev" },
+            resolveTheme({ theme: "solid-light", width: 460 })
+          ),
+        },
+        {
+          type: "svg",
+          svg: renderLink(
+            { label: "GitHub", value: "@your-username" },
+            resolveTheme({ theme: "solid-light", width: 460 })
+          ),
+        },
+      ],
+    },
   };
 
-  return {
-    html: specimens[key] || specimens["typing-dark"],
-    stage: key && key.includes("light") ? "light" : "dark",
-  };
+  return specimens[key] || specimens["typing-dark"];
 }
 
 function renderGallerySpecimens() {

@@ -402,16 +402,121 @@ function loadImage(src) {
   });
 }
 
-function parseSvgList(html) {
-  const matches = String(html || "").match(/<svg[\s\S]*?<\/svg>/gi) || [];
-  return matches.map((svgStr) => {
-    const wM = svgStr.match(/\bwidth="([\d.]+)"/);
-    const hM = svgStr.match(/\bheight="([\d.]+)"/);
-    const w = wM ? parseFloat(wM[1]) : 466;
-    const h = hM ? parseFloat(hM[1]) : 100;
-    const src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgStr)}`;
-    return { src, w, h };
-  });
+function parseSvgDimensions(svgStr) {
+  const wM = String(svgStr || "").match(/\bwidth="([\d.]+)"/);
+  const hM = String(svgStr || "").match(/\bheight="([\d.]+)"/);
+  return {
+    w: wM ? parseFloat(wM[1]) : 466,
+    h: hM ? parseFloat(hM[1]) : 100,
+    src: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(String(svgStr || ""))}`,
+  };
+}
+
+function parseDash(str) {
+  if (!str) return [];
+  return String(str)
+    .trim()
+    .split(/[\s,]+/)
+    .map(Number)
+    .filter((n) => Number.isFinite(n) && n > 0);
+}
+
+function buildTypingFrames(words) {
+  const list = (Array.isArray(words) ? words : String(words || "Hi, fastfetch").split(","))
+    .map((w) => String(w).trim())
+    .filter(Boolean);
+  if (!list.length) list.push("Hi");
+  const frames = [];
+  for (const word of list) {
+    frames.push(["", true], ["", false]);
+    for (let c = 1; c <= word.length; c += 1) {
+      frames.push([word.slice(0, c), true]);
+    }
+    for (let h = 0; h < 8; h += 1) {
+      frames.push([word, Math.floor(h / 2) % 2 === 0]);
+    }
+    for (let c = word.length - 1; c >= 0; c -= 1) {
+      frames.push([word.slice(0, c), true]);
+    }
+    frames.push(["", true], ["", false]);
+  }
+  return { frames, firstWord: list[0] };
+}
+
+function typingStepIndex(item, timeSec) {
+  const dur = Math.max(2, Number(item.duration) || 8);
+  const frac = (((timeSec % dur) + dur) % dur) / dur;
+  return Math.min(item.frames.length - 1, Math.floor(frac * item.frames.length));
+}
+
+function drawTypingCard(ctx, item, x, y, dw, dh, timeSec, paused) {
+  const t = item.theme;
+  const w = t.width || 460;
+  const h = 68;
+  const rx = Number(t.radius ?? 6);
+  const innerW = w - 2;
+  const promptTop = item.card.prompt_top ?? "\u250c your-username";
+  const promptBottom = item.card.prompt_bottom ?? "\u2514\u203a";
+
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(dw / item.w, dh / item.h);
+  ctx.translate(3, 3);
+
+  if (t.outline) {
+    ctx.save();
+    ctx.globalAlpha = Number(t.outline_opacity ?? 0.8);
+    ctx.strokeStyle = t.outline;
+    ctx.lineWidth = 3.5;
+    ctx.setLineDash(parseDash(t.outline_dasharray));
+    ctx.lineDashOffset = 1;
+    ctx.beginPath();
+    ctx.roundRect(1, 1, innerW, h, rx);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  ctx.save();
+  ctx.globalAlpha = Number(t.bg_opacity ?? 0.5);
+  ctx.fillStyle = t.bg;
+  ctx.beginPath();
+  ctx.roundRect(1, 1, innerW, h, rx);
+  ctx.fill();
+  ctx.restore();
+
+  ctx.save();
+  ctx.strokeStyle = t.stroke;
+  ctx.lineWidth = 2;
+  ctx.setLineDash(parseDash(t.dasharray));
+  ctx.beginPath();
+  ctx.roundRect(1, 1, innerW, h, rx);
+  ctx.stroke();
+  ctx.restore();
+
+  ctx.font = fnt(400, 14, FONTS.mono);
+  ctx.fillStyle = t.text;
+  ctx.textBaseline = "alphabetic";
+  ctx.textAlign = "left";
+  ctx.fillText(promptTop, 24, 30);
+  ctx.fillText(promptBottom, 24, 54);
+
+  const stepIdx = typingStepIndex(item, timeSec);
+  let [typedText, cursorOn] = item.frames[stepIdx] || [item.firstWord, true];
+  if (paused && !typedText) {
+    typedText = item.firstWord;
+    cursorOn = true;
+  }
+
+  const startX = 24 + (promptBottom.length + 1) * 8.4;
+  if (typedText) {
+    ctx.fillText(typedText, startX, 54);
+  }
+  if (cursorOn) {
+    const cursorX = startX + (typedText ? ctx.measureText(typedText).width : 0);
+    ctx.fillRect(cursorX, 41, 1.5, 16);
+  }
+
+  ctx.restore();
 }
 
 const clockFmt = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false });
@@ -720,28 +825,33 @@ export function initCanvas(o) {
         drawMono(ctx, "Your README stack / Live", 20, 32, entry?.stage === "light" ? "#57606a" : "#8b949e", "left", 12);
       }
 
-      const imgs = entry?.imgs || [];
-      if (imgs.length) {
+      const items = entry?.items || [];
+      const pausedTyping = reduced || o.isPaused();
+      if (items.length) {
         const padX = w > 500 ? 48 : 26;
         const padY = tile.spec.key === "live" ? 48 : 30;
         const availW = w - padX * 2;
         const availH = h - padY * 2;
         const gap = 14;
         let totalH = 0;
-        const scaled = imgs.map((item) => {
+        const scaled = items.map((item) => {
           const sw = Math.min(availW, item.w * (w > 500 ? 1.35 : 0.88));
           const sh = (item.h / item.w) * sw;
           totalH += sh;
-          return { img: item.img, sw, sh };
+          return { item, sw, sh };
         });
         totalH += gap * Math.max(0, scaled.length - 1);
         const fitScale = totalH > availH ? availH / totalH : 1;
         const finalH = totalH * fitScale;
         let cy = (h - finalH) / 2 + (tile.spec.key === "live" ? 8 : 0);
-        for (const item of scaled) {
-          const dw = item.sw * fitScale;
-          const dh = item.sh * fitScale;
-          ctx.drawImage(item.img, (w - dw) / 2, cy, dw, dh);
+        for (const row of scaled) {
+          const dw = row.sw * fitScale;
+          const dh = row.sh * fitScale;
+          if (row.item.type === "typing") {
+            drawTypingCard(ctx, row.item, (w - dw) / 2, cy, dw, dh, typingTime, pausedTyping);
+          } else {
+            ctx.drawImage(row.item.img, (w - dw) / 2, cy, dw, dh);
+          }
           cy += dh + gap * fitScale;
         }
       } else {
@@ -893,6 +1003,7 @@ export function initCanvas(o) {
   let dragging = false;
   let lastInput = -1e9;
   let now = 0;
+  let typingTime = 0;
   let revealStart = -1;
   let last = performance.now();
   let frame = 0;
@@ -941,26 +1052,46 @@ export function initCanvas(o) {
   }
 
   async function loadSpecimenKey(key) {
-    const r = o.getSpecimen(key, { staticTyping: true });
-    const parsed = parseSvgList(r.html);
-    const loaded = await Promise.all(
-      parsed.map(async (item) => {
-        const img = await loadImage(item.src);
-        return img ? { img, w: item.w, h: item.h } : null;
+    const r = o.getSpecimen(key);
+    const rawItems = Array.isArray(r?.items) ? r.items : [];
+    const resolved = await Promise.all(
+      rawItems.map(async (item) => {
+        if (item.type === "typing") {
+          const built = buildTypingFrames(item.card?.words);
+          return {
+            type: "typing",
+            card: item.card,
+            theme: item.theme,
+            duration: Math.max(2, Number(item.card?.duration) || 8),
+            frames: built.frames,
+            firstWord: built.firstWord,
+            w: (item.theme?.width || 460) + 6,
+            h: 84,
+          };
+        }
+        const meta = parseSvgDimensions(item.svg);
+        const img = await loadImage(meta.src);
+        return img ? { type: "img", img, w: meta.w, h: meta.h } : null;
       })
     );
+    const items = resolved.filter(Boolean);
+    const hasTyping = items.some((it) => it.type === "typing");
     specImgCache.set(key, {
-      stage: r.stage,
-      imgs: loaded.filter(Boolean),
+      stage: r?.stage || "dark",
+      items,
+      hasTyping,
     });
     for (const t of tiles) {
-      if (t.kind === "specimen" && t.spec.key === key) repaintTile(t);
+      if (t.kind === "specimen" && t.spec.key === key) {
+        t.lastStepKey = "";
+        repaintTile(t);
+      }
     }
   }
 
   function repaintAllText() {
     for (const t of tiles) {
-      if (t.kind !== "specimen") repaintTile(t);
+      if (t.kind !== "specimen" || specImgCache.get(t.spec.key)?.hasTyping) repaintTile(t);
     }
   }
 
@@ -1412,6 +1543,11 @@ export function initCanvas(o) {
     const hw = (vw / zMin) * (0.5 + CFG.cullMargin) * grow + C2;
     const hh = (vh / zMin) * (0.5 + CFG.cullMargin) * grow + C2;
 
+    const pausedTyping = reduced || o.isPaused();
+    if (!pausedTyping) {
+      typingTime += dt;
+    }
+
     let animating = false;
     for (const tile of tiles) {
       if (tile.reveal < 1) {
@@ -1427,6 +1563,22 @@ export function initCanvas(o) {
       for (let kx = Math.ceil((-ax - dx) / W); kx <= Math.floor((ax - dx) / W); kx += 1) {
         for (let ky = Math.ceil((-ay - dy) / H); ky <= Math.floor((ay - dy) / H); ky += 1) {
           tile.copies.push([dx + kx * W, dy + ky * H]);
+        }
+      }
+      if (tile.kind === "specimen" && tile.copies.length) {
+        const entry = specImgCache.get(tile.spec.key);
+        if (entry?.hasTyping) {
+          const stepKey = pausedTyping
+            ? `P:${Math.floor(typingTime * 10)}`
+            : entry.items
+                .filter((it) => it.type === "typing")
+                .map((it) => typingStepIndex(it, typingTime))
+                .join(",");
+          if (stepKey !== tile.lastStepKey) {
+            tile.lastStepKey = stepKey;
+            repaintTile(tile);
+            animating = true;
+          }
         }
       }
     }
