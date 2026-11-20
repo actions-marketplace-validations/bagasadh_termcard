@@ -12,11 +12,11 @@ Generate terminal-styled SVG profile cards (typing banner, info box, GitHub stre
 ## Features
 - Four card types (`typing`, `info`, `streak`, `link`) and five built-in themes (`dashed-dark`, `dashed-light`, `solid-dark`, `solid-light`, `terminal-green`).
 - Zero external dependencies (Python 3 standard library only) with optional auto-injection between `<!-- TERMCARD:START -->` and `<!-- TERMCARD:END -->`.
-- Static visual builder in `web/` (deployable directly to Vercel) to edit cards and copy `termcard.json` plus workflow YAML.
+- Static visual builder at [termcard.vercel.app](https://termcard.vercel.app/) to customize cards and create `termcard.json` + workflow YAML on GitHub in one click.
 
 ## Usage
 
-Copy [`examples/termcard.json`](examples/termcard.json) into your profile repo as `termcard.json`, then add `.github/workflows/termcard.yml`:
+Use the [Visual Web Builder](https://termcard.vercel.app/) or copy [`examples/termcard.json`](examples/termcard.json) into your profile repo as `termcard.json`, add `<!-- TERMCARD:START -->` and `<!-- TERMCARD:END -->` to your profile `README.md`, then add `.github/workflows/termcard.yml`:
 
 ```yaml
 name: Update termcard
@@ -37,5 +37,7 @@ jobs:
           readme: README.md
           token: ${{ secrets.GITHUB_TOKEN }}
 ```
+
+Note: `GITHUB_TOKEN` counts public contributions only; use a Personal Access Token secret (such as `secrets.STREAK_TOKEN`) to include private repos.
 
 Run locally: `python3 termcard.py --config examples/termcard.json --out assets --skip-streak` or preview the web builder with `python3 -m http.server 3000 -d web`.
