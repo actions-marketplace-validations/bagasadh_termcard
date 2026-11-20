@@ -86,7 +86,7 @@ body {
 }
 
 /* Base-layer affordances: pointer on all enabled controls, not-allowed on disabled. */
-a[href],
+a[href]:not([aria-disabled="true"]),
 button:not(:disabled),
 summary,
 select:not(:disabled),
@@ -103,6 +103,7 @@ input[type="range"]:not(:disabled),
 button:disabled,
 input:disabled,
 select:disabled,
+a[href][aria-disabled="true"],
 [aria-disabled="true"] {
   cursor: not-allowed;
   opacity: 0.5;
@@ -1003,6 +1004,17 @@ input[type="range"] {
   margin: 12px 0 0;
   font-size: 0.82rem;
   color: var(--muted);
+}
+
+.gh-quick-bar {
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px dashed var(--hairline);
+}
+
+.gh-user-hint {
+  margin: 6px 0 0;
+  font-size: 0.82rem;
 }
 
 .export-tabs {

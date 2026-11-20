@@ -338,6 +338,13 @@ def format_range(start: dt.date | None, end: dt.date | None) -> str:
     return f"{start.strftime('%b %d')} - {end.strftime('%b %d')}"
 
 
+def resolve_streak_user(card: dict) -> str:
+    raw = str(card.get("user") or "").strip()
+    if raw and raw.lower() != "your-username":
+        return raw
+    return os.environ.get("GITHUB_REPOSITORY_OWNER", "").strip()
+
+
 def render_streak(card: dict, t: dict, token: str, days_override: dict[str, int] | None = None) -> str:
     w = int(card.get("width", t["width"]))
     h = 170
@@ -355,9 +362,9 @@ def render_streak(card: dict, t: dict, token: str, days_override: dict[str, int]
         days = {str(k): int(v) for k, v in card["demo_days"].items()}
         today = max(dt.date.fromisoformat(k) for k in days)
     else:
-        user = card.get("user")
+        user = resolve_streak_user(card)
         if not user:
-            raise ValueError("Streak card requires 'user'")
+            raise ValueError("Streak card requires 'user' (or GITHUB_REPOSITORY_OWNER in Actions)")
         if not token:
             raise ValueError("Streak card requires GITHUB_TOKEN (or pass --skip-streak for offline builds)")
         days = fetch_contribution_days(user, token, today.year)
@@ -497,3 +504,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

@@ -36,6 +36,7 @@ runs:
       shell: bash
       env:
         GITHUB_TOKEN: ${{ inputs.token }}
+        GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
         TC_CONFIG: ${{ inputs.config }}
         TC_OUT: ${{ inputs.output_dir }}
         TC_README: ${{ inputs.readme }}
@@ -61,3 +62,4 @@ runs:
           git add "$TC_README"
         fi
         git diff --cached --quiet || (git commit -m "$TC_MSG" && git push)
+

@@ -112,6 +112,21 @@ class TestTermcard(unittest.TestCase):
             self.assertIn('<a href="https://example.com"><img src="assets/l.svg"', readme_text)
             self.assertNotIn("old", readme_text)
 
+    def test_resolve_streak_user_fallback(self) -> None:
+        import os
+        old = os.environ.get("GITHUB_REPOSITORY_OWNER")
+        try:
+            os.environ["GITHUB_REPOSITORY_OWNER"] = "octocat"
+            self.assertEqual(termcard.resolve_streak_user({"user": "your-username"}), "octocat")
+            self.assertEqual(termcard.resolve_streak_user({}), "octocat")
+            self.assertEqual(termcard.resolve_streak_user({"user": "bagasadh"}), "bagasadh")
+        finally:
+            if old is None:
+                os.environ.pop("GITHUB_REPOSITORY_OWNER", None)
+            else:
+                os.environ["GITHUB_REPOSITORY_OWNER"] = old
+
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -81,10 +81,15 @@ function createStarterState() {
   };
 }
 
+const STORAGE_KEY = "termcard_builder_v1";
+const GH_USER_RE = /^[a-z\d](?:[a-z\d]|-(?=[a-z\d])){0,38}$/i;
+
 let state = createStarterState();
 let typingPaused = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 let previewBackdrop = "dark";
+let pageTheme = "dark";
 let includePrivatePat = false;
+let deployUser = "";
 
 const el = {
   motionToggle: document.getElementById("motion-toggle"),
@@ -109,6 +114,10 @@ const el = {
   livePreviewStage: document.getElementById("live-preview-stage"),
   statusBanner: document.getElementById("status-banner"),
   errorBanner: document.getElementById("error-banner"),
+  ghDeployUser: document.getElementById("gh-deploy-user"),
+  ghUserHint: document.getElementById("gh-user-hint"),
+  ghCreateJsonBtn: document.getElementById("gh-create-json-btn"),
+  ghCreateYamlBtn: document.getElementById("gh-create-yaml-btn"),
   outputJson: document.getElementById("output-json"),
   outputYaml: document.getElementById("output-yaml"),
   outputMarkers: document.getElementById("output-markers"),
@@ -746,9 +755,103 @@ function renderPreviewAndExport() {
   }
 
   const exportConfig = buildExportConfig(state);
-  el.outputJson.textContent = `${JSON.stringify(exportConfig, null, 2)}\n`;
-  el.outputYaml.textContent = buildWorkflowYaml({ includePrivate: includePrivatePat });
+  const jsonText = `${JSON.stringify(exportConfig, null, 2)}\n`;
+  const yamlText = buildWorkflowYaml({ includePrivate: includePrivatePat });
+  el.outputJson.textContent = jsonText;
+  el.outputYaml.textContent = yamlText;
   el.outputMarkers.textContent = buildReadmeMarkers();
+  updateGithubQuickLinks(jsonText, yamlText);
+  saveToStorage();
+}
+
+function saveToStorage() {
+  try {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ state, deployUser, includePrivatePat, previewBackdrop, pageTheme })
+    );
+  } catch {
+    // Ignore storage failures in private browsing or restricted contexts.
+  }
+}
+
+function loadFromStorage() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+    const saved = JSON.parse(raw);
+    if (!saved || !saved.state || !Array.isArray(saved.state.cards)) return;
+    const tKey = THEMES[saved.state.theme] ? saved.state.theme : "dashed-dark";
+    const baseT = THEMES[tKey];
+    state = {
+      theme: tKey,
+      width: Number(saved.state.width) || 560,
+      radius: Number(saved.state.radius ?? 6),
+      useCustomColors: Boolean(saved.state.useCustomColors),
+      style: {
+        bg: saved.state.style?.bg || baseT.bg,
+        stroke: saved.state.style?.stroke || baseT.stroke,
+        text: saved.state.style?.text || baseT.text,
+        muted: saved.state.style?.muted || baseT.muted,
+        link: saved.state.style?.link || baseT.link,
+      },
+      cards: saved.state.cards.map((c) => ({ ...c, id: uid() })),
+    };
+    deployUser = typeof saved.deployUser === "string" ? saved.deployUser : "";
+    includePrivatePat = Boolean(saved.includePrivatePat);
+    previewBackdrop = saved.previewBackdrop === "light" ? "light" : "dark";
+    pageTheme = saved.pageTheme === "light" ? "light" : "dark";
+  } catch {
+    // Fall back to starter state if saved JSON is corrupted.
+  }
+}
+
+function getEffectiveGithubUser() {
+  const manual = deployUser.trim();
+  if (manual) return manual;
+  const streak = state.cards.find((c) => c.type === "streak" && c.user && c.user.trim().toLowerCase() !== "your-username");
+  return streak ? streak.user.trim() : "";
+}
+
+function updateGithubQuickLinks(jsonText, yamlText) {
+  const user = getEffectiveGithubUser();
+  const valid = Boolean(user && user.toLowerCase() !== "your-username" && GH_USER_RE.test(user));
+
+  const setLink = (anchor, filename, content) => {
+    if (!valid) {
+      anchor.href = "#gh-deploy-user";
+      anchor.removeAttribute("target");
+      anchor.removeAttribute("rel");
+      anchor.setAttribute("aria-disabled", "true");
+      return true;
+    }
+    const url = `https://github.com/${encodeURIComponent(user)}/${encodeURIComponent(user)}/new/main?filename=${encodeURIComponent(filename)}&value=${encodeURIComponent(content)}`;
+    if (url.length > 7000) {
+      anchor.href = "#gh-deploy-user";
+      anchor.removeAttribute("target");
+      anchor.removeAttribute("rel");
+      anchor.setAttribute("aria-disabled", "true");
+      return false;
+    }
+    anchor.href = url;
+    anchor.target = "_blank";
+    anchor.rel = "noopener noreferrer";
+    anchor.removeAttribute("aria-disabled");
+    return true;
+  };
+
+  const jsonFits = setLink(el.ghCreateJsonBtn, "termcard.json", jsonText);
+  setLink(el.ghCreateYamlBtn, ".github/workflows/termcard.yml", yamlText);
+
+  if (!user) {
+    el.ghUserHint.textContent = "Enter your GitHub username to prefill files directly in github.com/username/username.";
+  } else if (!valid) {
+    el.ghUserHint.textContent = "Enter a valid GitHub username (letters, numbers, single hyphens, max 39 chars).";
+  } else if (!jsonFits) {
+    el.ghUserHint.textContent = `Ready for github.com/${user}/${user} (JSON is too long for a URL prefill; use Copy or Download).`;
+  } else {
+    el.ghUserHint.textContent = `1-click links point to github.com/${user}/${user} (main branch).`;
+  }
 }
 
 function addCard(type) {
@@ -838,13 +941,16 @@ function setPreviewBackdrop(mode) {
     btn.classList.toggle("is-active", active);
     btn.setAttribute("aria-pressed", String(active));
   });
+  saveToStorage();
 }
 
 function applyPageTheme(mode) {
-  const isLight = mode === "light";
-  document.documentElement.setAttribute("data-theme", isLight ? "light" : "dark");
+  pageTheme = mode === "light" ? "light" : "dark";
+  const isLight = pageTheme === "light";
+  document.documentElement.setAttribute("data-theme", pageTheme);
   el.themeToggle.textContent = isLight ? "Dark mode" : "Light mode";
   el.themeToggle.setAttribute("aria-pressed", String(isLight));
+  saveToStorage();
 }
 
 function updateMotionButton() {
@@ -1035,15 +1141,56 @@ function wireEvents() {
   });
 
   const resetAll = () => {
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch {
+      // Ignore storage errors.
+    }
     state = createStarterState();
+    deployUser = "";
+    includePrivatePat = false;
+    el.ghDeployUser.value = "";
+    el.privatePatToggle.checked = false;
     syncFrameControls();
     renderThemePicker();
     renderCardsEditor();
     renderPreviewAndExport();
-    showStatus("Restored starter profile cards.");
+    showStatus("Restored starter profile cards and cleared saved draft.");
   };
   document.getElementById("reset-default-btn").addEventListener("click", resetAll);
   document.getElementById("restore-from-empty-btn").addEventListener("click", resetAll);
+
+  el.ghDeployUser.addEventListener("input", (e) => {
+    const prev = deployUser.trim();
+    deployUser = e.target.value.trim();
+    let editorNeedsRefresh = false;
+    if (deployUser && GH_USER_RE.test(deployUser)) {
+      state.cards.forEach((card) => {
+        if (card.type === "streak" && (!card.user || card.user === "your-username" || card.user === prev)) {
+          card.user = deployUser;
+          editorNeedsRefresh = true;
+        }
+        if (card.type === "typing" && (card.prompt_top === "┌ your-username" || (prev && card.prompt_top === `┌ ${prev}`))) {
+          card.prompt_top = `┌ ${deployUser}`;
+          editorNeedsRefresh = true;
+        }
+      });
+    }
+    if (editorNeedsRefresh) {
+      renderCardsEditor();
+    }
+    renderPreviewAndExport();
+  });
+
+  const guardDisabledLink = (e) => {
+    if (e.currentTarget.getAttribute("aria-disabled") === "true") {
+      e.preventDefault();
+      el.ghDeployUser.focus();
+      showStatus("Enter your GitHub username above to enable 1-click Create on GitHub.");
+    }
+  };
+  el.ghCreateJsonBtn.addEventListener("click", guardDisabledLink);
+  el.ghCreateYamlBtn.addEventListener("click", guardDisabledLink);
 
   document.querySelectorAll("[data-backdrop]").forEach((btn) => {
     btn.addEventListener("click", () => setPreviewBackdrop(btn.dataset.backdrop));
@@ -1121,11 +1268,16 @@ function wireEvents() {
 }
 
 // Boot
+loadFromStorage();
 updateMotionButton();
-applyPageTheme("dark");
+applyPageTheme(pageTheme);
+setPreviewBackdrop(previewBackdrop);
+el.ghDeployUser.value = deployUser;
+el.privatePatToggle.checked = includePrivatePat;
 syncFrameControls();
 renderThemePicker();
 renderGallerySpecimens();
 renderCardsEditor();
 renderPreviewAndExport();
 wireEvents();
+
