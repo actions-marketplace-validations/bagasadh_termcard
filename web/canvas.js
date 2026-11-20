@@ -602,7 +602,7 @@ export function initCanvas(o) {
   const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
   const coarse = matchMedia("(pointer: coarse)").matches;
   const canAim = matchMedia("(any-pointer: fine)").matches;
-  o.hint.textContent = coarse ? "SWIPE TO EXPLORE" : "DRAG \u00b7 ARROWS \u00b7 \u21b5 OPEN";
+  o.hint.textContent = coarse && !canAim ? "SWIPE TO EXPLORE" : "DRAG \u00b7 ARROWS \u00b7 \u21b5 OPEN";
 
   let canvasEl = document.createElement("canvas");
   stage.replaceChildren(canvasEl);
@@ -729,7 +729,7 @@ export function initCanvas(o) {
       ctx.fillStyle = P.text;
       ctx.font = fnt(500, 38, FONTS.sans);
       setSpacing(ctx, -1);
-      const ny = drawWrap(ctx, "No hosted server, no API quotas.", PAD, 148, w - PAD * 2, 46);
+      const ny = drawWrap(ctx, "Static SVGs built in your repo.", PAD, 148, w - PAD * 2, 46);
       ctx.font = fnt(400, 44, FONTS.serif, "italic");
       drawWrap(ctx, "One JSON file and a GitHub Action.", PAD, ny + 14, w - PAD * 2, 48);
       setSpacing(ctx, 0);
@@ -932,7 +932,7 @@ export function initCanvas(o) {
       ctx.fillStyle = P.text;
       setSpacing(ctx, -2);
       ctx.font = fnt(700, Math.min(58, h * 0.3), FONTS.sans);
-      ctx.fillText("Zero server.", PAD, h - 38);
+      ctx.fillText("Pure SVG.", PAD, h - 38);
       setSpacing(ctx, 0);
     } else {
       drawCardFrame(ctx, w, h, P.bone, P.boneBorder);
