@@ -85,6 +85,7 @@ const STORAGE_KEY = "termcard_builder_v1";
 const GH_USER_RE = /^[a-z\d](?:[a-z\d]|-(?=[a-z\d])){0,38}$/i;
 
 let state = createStarterState();
+let openCardId = state.cards[0]?.id || null;
 let typingPaused = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 let previewBackdrop = "dark";
 let pageTheme = "dark";
@@ -348,15 +349,43 @@ function renderCardsEditor() {
   el.emptyCardsState.hidden = count > 0;
 
   state.cards.forEach((card, idx) => {
+    const isOpen = card.id === openCardId;
+    const bodyId = `body-${card.id}`;
+
     const box = document.createElement("article");
-    box.className = "card-editor";
+    box.className = `card-editor${isOpen ? "" : " is-collapsed"}`;
 
     const head = document.createElement("div");
     head.className = "card-editor-head";
 
+    const toggleBtn = document.createElement("button");
+    toggleBtn.type = "button";
+    toggleBtn.className = "card-toggle-btn";
+    toggleBtn.setAttribute("aria-expanded", String(isOpen));
+    toggleBtn.setAttribute("aria-controls", bodyId);
+
+    const meta = document.createElement("span");
+    meta.className = "card-toggle-meta";
+
     const title = document.createElement("span");
     title.className = "card-type-title";
     title.textContent = `${String(idx + 1).padStart(2, "0")} / ${card.type.toUpperCase()}`;
+
+    const fileHint = document.createElement("span");
+    fileHint.className = "card-file-hint";
+    fileHint.textContent = card.output || "";
+
+    meta.append(title, fileHint);
+
+    const stateTxt = document.createElement("span");
+    stateTxt.className = "card-toggle-state";
+    stateTxt.textContent = isOpen ? "Hide" : "Edit";
+
+    toggleBtn.append(meta, stateTxt);
+    toggleBtn.addEventListener("click", () => {
+      openCardId = isOpen ? null : card.id;
+      renderCardsEditor();
+    });
 
     const actions = document.createElement("div");
     actions.className = "card-editor-actions";
@@ -392,17 +421,22 @@ function renderCardsEditor() {
     delBtn.setAttribute("aria-label", `Remove ${card.type} card ${idx + 1}`);
     delBtn.addEventListener("click", () => {
       state.cards.splice(idx, 1);
+      if (openCardId === card.id) {
+        openCardId = state.cards[Math.min(idx, state.cards.length - 1)]?.id || null;
+      }
       renderCardsEditor();
       renderPreviewAndExport();
       showStatus(`Removed ${card.type} card.`);
     });
 
     actions.append(upBtn, downBtn, delBtn);
-    head.append(title, actions);
+    head.append(toggleBtn, actions);
     box.appendChild(head);
 
     const fields = document.createElement("div");
+    fields.id = bodyId;
     fields.className = "editor-fields";
+    fields.hidden = !isOpen;
 
     if (card.type === "typing") {
       const topRow = document.createElement("div");
@@ -797,6 +831,7 @@ function loadFromStorage() {
       },
       cards: saved.state.cards.map((c) => ({ ...c, id: uid() })),
     };
+    openCardId = state.cards[0]?.id || null;
     deployUser = typeof saved.deployUser === "string" ? saved.deployUser : "";
     includePrivatePat = Boolean(saved.includePrivatePat);
     previewBackdrop = saved.previewBackdrop === "light" ? "light" : "dark";
@@ -906,6 +941,7 @@ function addCard(type) {
       alt: "GitHub",
     });
   }
+  openCardId = state.cards[state.cards.length - 1]?.id || null;
   renderCardsEditor();
   renderPreviewAndExport();
   showStatus(`Added ${type} card.`);
@@ -1055,6 +1091,7 @@ function importConfigFromText(rawText) {
     cards: importedCards,
   };
 
+  openCardId = state.cards[0]?.id || null;
   syncFrameControls();
   renderThemePicker();
   renderCardsEditor();
@@ -1147,6 +1184,7 @@ function wireEvents() {
       // Ignore storage errors.
     }
     state = createStarterState();
+    openCardId = state.cards[0]?.id || null;
     deployUser = "";
     includePrivatePat = false;
     el.ghDeployUser.value = "";

@@ -813,7 +813,7 @@ input[type="range"] {
   border: 1px solid var(--border);
   border-radius: 4px;
   background: var(--bg);
-  padding: 14px;
+  padding: 10px 12px;
   min-width: 0;
 }
 
@@ -828,10 +828,64 @@ input[type="range"] {
   border-bottom: 1px solid var(--hairline);
 }
 
+.card-editor.is-collapsed .card-editor-head {
+  padding-bottom: 0;
+  margin-bottom: 0;
+  border-bottom: 0;
+}
+
+.card-toggle-btn {
+  flex: 1 1 160px;
+  min-height: 44px;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  text-align: left;
+}
+
+.card-toggle-btn:hover {
+  background: var(--surface);
+  border-color: var(--hairline);
+}
+
+.card-toggle-meta {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
 .card-type-title {
   font-family: "JetBrains Mono", ui-monospace, monospace;
   font-size: 0.86rem;
   font-weight: 700;
+}
+
+.card-file-hint {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.76rem;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card-toggle-state {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.74rem;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.editor-fields[hidden] {
+  display: none;
 }
 
 .card-editor-actions {
