@@ -10,6 +10,8 @@ import {
   buildWorkflowYaml,
   buildReadmeMarkers,
 } from "./renderer.js";
+import { initCanvas } from "./canvas.js";
+import { createSound } from "./sound.js";
 
 let nextId = 1;
 const uid = () => `c${nextId++}`;
@@ -82,6 +84,7 @@ function createStarterState() {
 }
 
 const STORAGE_KEY = "termcard_builder_v1";
+const SOUND_KEY = "termcard_sound_v1";
 const GH_USER_RE = /^[a-z\d](?:[a-z\d]|-(?=[a-z\d])){0,38}$/i;
 
 let state = createStarterState();
@@ -91,12 +94,35 @@ let previewBackdrop = "dark";
 let pageTheme = "dark";
 let includePrivatePat = false;
 let deployUser = "";
+let sheetOpen = false;
+let sheetOpenedAt = 0;
+let lastFocusBeforeSheet = null;
+let soundOn = false;
+try {
+  soundOn = localStorage.getItem(SOUND_KEY) === "1";
+} catch {
+  // Ignore storage errors.
+}
+const sound = createSound();
+let canvas = null;
 
 const el = {
+  stage: document.getElementById("canvas-stage"),
+  world: document.getElementById("canvas-world"),
+  aim: document.getElementById("canvas-aim"),
+  cursorLabel: document.getElementById("cursor-label"),
+  presetCount: document.getElementById("hud-preset-count"),
+  hudHint: document.getElementById("hud-hint-text"),
+  hudTz: document.getElementById("hud-tz"),
+  hudClock: document.getElementById("hud-clock"),
+  hudX: document.getElementById("hud-x"),
+  hudY: document.getElementById("hud-y"),
+  soundToggle: document.getElementById("sound-toggle"),
+  builderSheet: document.getElementById("builder-sheet"),
+  closeSheetBtn: document.getElementById("close-sheet-btn"),
+  skipToBuilder: document.getElementById("skip-to-builder"),
   motionToggle: document.getElementById("motion-toggle"),
   themeToggle: document.getElementById("theme-toggle"),
-  mobileMenuBtn: document.getElementById("mobile-menu-btn"),
-  mobileNavPanel: document.getElementById("mobile-nav-panel"),
   themePicker: document.getElementById("theme-picker"),
   widthInput: document.getElementById("card-width"),
   widthOut: document.getElementById("card-width-val"),
@@ -174,8 +200,24 @@ function validateState() {
   return errors;
 }
 
-function renderGallerySpecimens() {
+function getSpecimen(key) {
   const opts = { paused: typingPaused };
+  if (key === "live") {
+    const resolvedTheme = resolveTheme({
+      theme: state.theme,
+      width: state.width,
+      radius: state.radius,
+      style: state.useCustomColors ? state.style : undefined,
+    });
+    const html = state.cards.length
+      ? state.cards
+          .slice(0, 4)
+          .map((card) => renderCard(card, resolvedTheme, opts))
+          .join("")
+      : '<p class="preview-empty-note">Add cards in the builder to preview your stack here.</p>';
+    return { html, stage: previewBackdrop };
+  }
+
   const specimens = {
     "typing-dark": renderTyping(
       { prompt_top: "┌ bagasadh", prompt_bottom: "└›", words: ["Hi", "fastfetch"], duration: 8 },
@@ -242,12 +284,14 @@ function renderGallerySpecimens() {
       ),
   };
 
-  document.querySelectorAll("[data-specimen]").forEach((node) => {
-    const key = node.getAttribute("data-specimen");
-    if (specimens[key]) {
-      node.innerHTML = specimens[key];
-    }
-  });
+  return {
+    html: specimens[key] || specimens["typing-dark"],
+    stage: key && key.includes("light") ? "light" : "dark",
+  };
+}
+
+function renderGallerySpecimens() {
+  canvas?.refresh();
 }
 
 function renderThemePicker() {
@@ -806,6 +850,7 @@ function renderPreviewAndExport() {
   el.outputYaml.textContent = yamlText;
   el.outputMarkers.textContent = buildReadmeMarkers();
   updateGithubQuickLinks(jsonText, yamlText);
+  canvas?.refreshLive();
   saveToStorage();
 }
 
@@ -962,6 +1007,7 @@ function addCard(type) {
 async function copyText(text, label) {
   try {
     await navigator.clipboard.writeText(text);
+    sound.chime();
     showStatus(`Copied ${label} to clipboard.`);
   } catch {
     showStatus(`Clipboard blocked by browser. Select and copy ${label} manually from the box below.`);
@@ -989,7 +1035,34 @@ function setPreviewBackdrop(mode) {
     btn.classList.toggle("is-active", active);
     btn.setAttribute("aria-pressed", String(active));
   });
+  canvas?.refreshLive();
   saveToStorage();
+}
+
+function updateSoundButton() {
+  if (!el.soundToggle) return;
+  el.soundToggle.classList.toggle("is-on", soundOn);
+  el.soundToggle.setAttribute("aria-pressed", String(soundOn));
+}
+
+function openSheet() {
+  if (sheetOpen) return;
+  sheetOpen = true;
+  sheetOpenedAt = performance.now();
+  lastFocusBeforeSheet = document.activeElement;
+  el.builderSheet.classList.add("is-open");
+  el.builderSheet.setAttribute("aria-hidden", "false");
+  sound.swoosh(true);
+  el.closeSheetBtn?.focus({ preventScroll: true });
+}
+
+function closeSheet() {
+  if (!sheetOpen) return;
+  sheetOpen = false;
+  el.builderSheet.classList.remove("is-open");
+  el.builderSheet.setAttribute("aria-hidden", "true");
+  sound.swoosh(false);
+  lastFocusBeforeSheet?.focus?.({ preventScroll: true });
 }
 
 function applyPageTheme(mode) {
@@ -1125,33 +1198,56 @@ function wireEvents() {
     applyPageTheme(current === "dark" ? "light" : "dark");
   });
 
-  el.mobileMenuBtn.addEventListener("click", () => {
-    const open = el.mobileNavPanel.hidden;
-    el.mobileNavPanel.hidden = !open;
-    el.mobileMenuBtn.setAttribute("aria-expanded", String(open));
+  el.soundToggle?.addEventListener("click", () => {
+    soundOn = !soundOn;
+    try {
+      localStorage.setItem(SOUND_KEY, soundOn ? "1" : "0");
+    } catch {
+      // Ignore storage errors.
+    }
+    updateSoundButton();
+    if (soundOn) sound.enable();
+    else sound.disable();
   });
 
-  el.mobileNavPanel.querySelectorAll("a").forEach((link) => {
-    link.addEventListener("click", () => {
-      el.mobileNavPanel.hidden = true;
-      el.mobileMenuBtn.setAttribute("aria-expanded", "false");
+  const resumeRememberedSound = (e) => {
+    if (!soundOn || sound.running || e.target.closest?.("#sound-toggle")) return;
+    sound.enable();
+  };
+  window.addEventListener("pointerdown", resumeRememberedSound, true);
+  window.addEventListener("keydown", resumeRememberedSound, true);
+
+  document.querySelectorAll("[data-fly]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      closeSheet();
+      canvas?.fly(btn.dataset.fly);
+      if (e.detail > 0) btn.blur();
     });
   });
 
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && !el.mobileNavPanel.hidden) {
-      el.mobileNavPanel.hidden = true;
-      el.mobileMenuBtn.setAttribute("aria-expanded", "false");
-      el.mobileMenuBtn.focus();
+  document.querySelectorAll("[data-open-sheet]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      sound.tap();
+      openSheet();
+    });
+  });
+
+  el.skipToBuilder?.addEventListener("click", (e) => {
+    e.preventDefault();
+    openSheet();
+  });
+
+  el.builderSheet?.addEventListener("click", (e) => {
+    if (e.target.closest(".sheet__backdrop") && performance.now() - sheetOpenedAt < 450) return;
+    if (e.target.closest("[data-close-sheet]")) {
+      closeSheet();
     }
   });
 
-  document.querySelectorAll("[data-preset]").forEach((tile) => {
-    tile.addEventListener("click", () => {
-      const preset = tile.getAttribute("data-preset");
-      selectCardTheme(preset, true);
-      document.getElementById("builder").scrollIntoView({ behavior: "smooth" });
-    });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && sheetOpen && !el.importDialog?.open) {
+      closeSheet();
+    }
   });
 
   el.widthInput.addEventListener("input", (e) => {
@@ -1320,14 +1416,41 @@ function wireEvents() {
 // Boot
 loadFromStorage();
 updateMotionButton();
+updateSoundButton();
 applyPageTheme(pageTheme);
 setPreviewBackdrop(previewBackdrop);
 el.ghDeployUser.value = deployUser;
 el.privatePatToggle.checked = includePrivatePat;
 syncFrameControls();
 renderThemePicker();
-renderGallerySpecimens();
 renderCardsEditor();
 renderPreviewAndExport();
+canvas = initCanvas({
+  stage: el.stage,
+  world: el.world,
+  aim: el.aim,
+  label: el.cursorLabel,
+  presetCount: el.presetCount,
+  hint: el.hudHint,
+  hudTz: el.hudTz,
+  hudClock: el.hudClock,
+  hudX: el.hudX,
+  hudY: el.hudY,
+  sound,
+  getSpecimen,
+  isSheetOpen: () => sheetOpen,
+  isPaused: () => typingPaused,
+  onAction: (action) => {
+    if (action.type === "preset" && action.preset) {
+      selectCardTheme(action.preset, true);
+      openSheet();
+    } else if (action.type === "builder") {
+      openSheet();
+    }
+  },
+});
 wireEvents();
+if (window.location.hash === "#builder" || window.location.hash === "#builder-sheet") {
+  openSheet();
+}
 
