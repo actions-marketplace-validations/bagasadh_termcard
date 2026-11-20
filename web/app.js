@@ -108,7 +108,6 @@ let canvas = null;
 
 const el = {
   stage: document.getElementById("canvas-stage"),
-  world: document.getElementById("canvas-world"),
   aim: document.getElementById("canvas-aim"),
   cursorLabel: document.getElementById("cursor-label"),
   presetCount: document.getElementById("hud-preset-count"),
@@ -200,8 +199,8 @@ function validateState() {
   return errors;
 }
 
-function getSpecimen(key) {
-  const opts = { paused: typingPaused };
+function getSpecimen(key, { staticTyping = false } = {}) {
+  const opts = { paused: staticTyping || typingPaused };
   if (key === "live") {
     const resolvedTheme = resolveTheme({
       theme: state.theme,
@@ -220,7 +219,7 @@ function getSpecimen(key) {
 
   const specimens = {
     "typing-dark": renderTyping(
-      { prompt_top: "┌ bagasadh", prompt_bottom: "└›", words: ["Hi", "fastfetch"], duration: 8 },
+      { prompt_top: "┌ bagasadh", prompt_bottom: "└›", words: ["fastfetch", "Hi"], duration: 8 },
       resolveTheme({ theme: "dashed-dark", width: 460 }),
       opts
     ),
@@ -1071,6 +1070,7 @@ function applyPageTheme(mode) {
   document.documentElement.setAttribute("data-theme", pageTheme);
   el.themeToggle.textContent = isLight ? "Dark mode" : "Light mode";
   el.themeToggle.setAttribute("aria-pressed", String(isLight));
+  canvas?.setTheme(pageTheme);
   saveToStorage();
 }
 
@@ -1427,7 +1427,6 @@ renderCardsEditor();
 renderPreviewAndExport();
 canvas = initCanvas({
   stage: el.stage,
-  world: el.world,
   aim: el.aim,
   label: el.cursorLabel,
   presetCount: el.presetCount,
@@ -1437,6 +1436,7 @@ canvas = initCanvas({
   hudX: el.hudX,
   hudY: el.hudY,
   sound,
+  getTheme: () => pageTheme,
   getSpecimen,
   isSheetOpen: () => sheetOpen,
   isPaused: () => typingPaused,

@@ -1,6 +1,7 @@
-// Infinite pan-anywhere field of tiles (DOM + CSS transforms). The idea and layout approach follow
-// reframehk.com: one "world" of tiles packed into columns, wrapped on both axes around the camera,
-// so it repeats seamlessly. Drag, wheel, touch and arrow keys move the camera with inertia; at rest it drifts.
+// Infinite pan-anywhere field of tiles rendered via WebGL (with 2D canvas fallback).
+// Mirrors reframehk.com's GPU shader architecture: one packed 7-column world wrapped on both axes,
+// inertia fling/wheel/keyboard physics, velocity barrel warp, SDF rounded corners, hover zoom,
+// and pure-math hit testing with zero DOM layout work per frame.
 
 const CFG = {
   colWidth: 420,
@@ -15,9 +16,13 @@ const CFG = {
   keySpeed: 1500,
   drift: 20,
   idleDelay: 1.8,
+  bend: 0.11,
+  maxBend: 0.2,
   speedTau: 0.12,
   flingWindow: 80,
   speedZoom: 0.045,
+  radius: 10,
+  segments: 20,
   flyDuration: 1.5,
   flyMaxDuration: 2.4,
   cullMargin: 0.25,
@@ -26,8 +31,47 @@ const CFG = {
 const C = CFG.colWidth;
 const G = CFG.gap;
 const C2 = C * 2 + G;
+const PAD = 32;
+const CAP_PAD = 4;
 const MARKETPLACE = "https://github.com/marketplace/actions/termcard-profile-svg-generator";
 const REPO = "https://github.com/bagasadh/termcard";
+
+const PALETTES = {
+  dark: {
+    clear: [0, 0, 0],
+    bg: "#000000",
+    surface: "#202020",
+    hairline: "#333333",
+    border: "#808080",
+    text: "#ffffff",
+    muted: "#b8b8b8",
+    bone: "#ffffff",
+    boneInk: "#000000",
+    boneMuted: "#525252",
+    boneBorder: "#767676",
+    dim: "rgba(255,255,255,0.24)",
+  },
+  light: {
+    clear: [1, 1, 1],
+    bg: "#ffffff",
+    surface: "#f4f4f4",
+    hairline: "#d6d6d6",
+    border: "#767676",
+    text: "#000000",
+    muted: "#525252",
+    bone: "#202020",
+    boneInk: "#ffffff",
+    boneMuted: "#c2c2c2",
+    boneBorder: "#8a8a8a",
+    dim: "rgba(0,0,0,0.22)",
+  },
+};
+
+const FONTS = {
+  sans: '"IBM Plex Sans", system-ui, -apple-system, sans-serif',
+  serif: '"Instrument Serif", Georgia, serif',
+  mono: '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace',
+};
 
 export const SPECS = [
   { key: "typing-dark", n: "01", title: "Typing banner", tag: "dashed-dark", preset: "dashed-dark", stage: "dark" },
@@ -41,14 +85,207 @@ const LIVE_SPEC = { key: "live", n: "LIVE", title: "Your README stack", tag: "yo
 const SPEC_BY_KEY = Object.fromEntries([...SPECS, LIVE_SPEC].map((s) => [s.key, s]));
 
 const STEPS = [
-  { n: "01", dark: true, h: "Open your profile repo", p: "Go to github.com/username/username. Create a public repo named exactly like your username if you do not have one." },
-  { n: "02", dark: true, h: "Add termcard.json", p: "Click Add file, then Create new file. Name it termcard.json, paste the config from the builder, and commit." },
-  { n: "03", dark: false, h: "Add workflow and markers", p: "Create .github/workflows/termcard.yml from the second tab, then paste the two TERMCARD comment lines into README.md." },
-  { n: "04", dark: false, h: "Run the Action once", p: "Open the Actions tab, pick Update termcard, and click Run workflow. Your SVGs refresh daily after that." },
+  { n: "01", dark: true, h: "Open your profile repo", p: "Go to github.com/username/username. Create a public repo named like your username if needed." },
+  { n: "02", dark: true, h: "Add termcard.json", p: "Click Add file then Create new file, name it termcard.json, paste your config, and commit." },
+  { n: "03", dark: false, h: "Workflow and markers", p: "Create .github/workflows/termcard.yml from the builder, then add the two TERMCARD comment lines to README.md." },
+  { n: "04", dark: false, h: "Run the Action once", p: "Open the Actions tab, select Update termcard, and click Run workflow. Your SVGs update daily after that." },
 ];
 
 const wrapD = (d, size) => d - size * Math.round(d / size);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const easeInOut = (k) => (k < 0.5 ? 2 * k * k : 1 - ((-2 * k + 2) ** 2) / 2);
+const easeOut = (k) => 1 - (1 - k) ** 2;
+
+const VS_SRC = `
+attribute vec2 aPos;
+attribute vec2 aUv;
+uniform vec2 uOffset;
+uniform vec2 uSize;
+uniform vec2 uView;
+uniform float uBend;
+uniform float uReveal;
+varying vec2 vUv;
+void main() {
+  vUv = aUv;
+  float s = mix(0.92, 1.0, uReveal);
+  vec2 rel = uOffset + aPos * uSize * s;
+  vec2 ndc = rel / uView;
+  float r2 = dot(ndc, ndc);
+  ndc *= 1.0 - 2.0 * uBend * r2 / (1.0 + r2);
+  gl_Position = vec4(ndc.x, -ndc.y, 0.0, 1.0);
+}
+`;
+
+const FS_SRC = `
+precision mediump float;
+uniform sampler2D uMap;
+uniform sampler2D uMap2;
+uniform vec2 uSize;
+uniform float uRadius;
+uniform float uHover;
+uniform float uReveal;
+uniform float uZoom;
+uniform float uAlt;
+varying vec2 vUv;
+void main() {
+  vec2 uv = (vUv - 0.5) * (1.0 - 0.04 * uHover * uZoom) + 0.5;
+  vec3 col = texture2D(uMap, uv).rgb;
+  if (uAlt > 0.5) {
+    col = mix(col, texture2D(uMap2, uv).rgb, uHover);
+  } else {
+    col = mix(col, col * 1.05 + 0.014, uHover);
+  }
+  vec2 p = (vUv - 0.5) * uSize;
+  vec2 q = abs(p) - uSize * 0.5 + uRadius;
+  float d = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - uRadius;
+  float a = 1.0 - smoothstep(-1.0, 0.5, d);
+  gl_FragColor = vec4(col, a * uReveal);
+}
+`;
+
+function createGL(canvasEl) {
+  const opts = { antialias: true, alpha: false, depth: false, stencil: false, powerPreference: "high-performance" };
+  let isWebGL2 = true;
+  let gl = canvasEl.getContext("webgl2", opts);
+  if (!gl) {
+    isWebGL2 = false;
+    gl = canvasEl.getContext("webgl", opts);
+  }
+  if (!gl) return null;
+
+  const compile = (type, src) => {
+    const sh = gl.createShader(type);
+    gl.shaderSource(sh, src);
+    gl.compileShader(sh);
+    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+      gl.deleteShader(sh);
+      return null;
+    }
+    return sh;
+  };
+  const vs = compile(gl.VERTEX_SHADER, VS_SRC);
+  const fs = compile(gl.FRAGMENT_SHADER, FS_SRC);
+  if (!vs || !fs) return null;
+
+  const prog = gl.createProgram();
+  gl.attachShader(prog, vs);
+  gl.attachShader(prog, fs);
+  gl.linkProgram(prog);
+  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) return null;
+
+  // Build subdivided unit quad (segments x segments) so barrel bend curves smoothly.
+  const seg = CFG.segments;
+  const cols = seg + 1;
+  const verts = new Float32Array(cols * cols * 4);
+  let vi = 0;
+  for (let iy = 0; iy <= seg; iy += 1) {
+    const v = iy / seg;
+    const py = v - 0.5;
+    for (let ix = 0; ix <= seg; ix += 1) {
+      const u = ix / seg;
+      verts[vi++] = u - 0.5;
+      verts[vi++] = py;
+      verts[vi++] = u;
+      verts[vi++] = v;
+    }
+  }
+  const indices = new Uint16Array(seg * seg * 6);
+  let ii = 0;
+  for (let iy = 0; iy < seg; iy += 1) {
+    for (let ix = 0; ix < seg; ix += 1) {
+      const a = iy * cols + ix;
+      const b = a + 1;
+      const c = a + cols;
+      const d = c + 1;
+      indices[ii++] = a;
+      indices[ii++] = c;
+      indices[ii++] = b;
+      indices[ii++] = b;
+      indices[ii++] = c;
+      indices[ii++] = d;
+    }
+  }
+
+  const vbo = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+  gl.bufferData(gl.ARRAY_BUFFER, verts, gl.STATIC_DRAW);
+
+  const ibo = gl.createBuffer();
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
+
+  gl.useProgram(prog);
+  const aPos = gl.getAttribLocation(prog, "aPos");
+  const aUv = gl.getAttribLocation(prog, "aUv");
+  gl.enableVertexAttribArray(aPos);
+  gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 16, 0);
+  gl.enableVertexAttribArray(aUv);
+  gl.vertexAttribPointer(aUv, 2, gl.FLOAT, false, 16, 8);
+
+  const u = {};
+  for (const name of ["uOffset", "uSize", "uView", "uBend", "uReveal", "uMap", "uMap2", "uRadius", "uHover", "uZoom", "uAlt"]) {
+    u[name] = gl.getUniformLocation(prog, name);
+  }
+  gl.uniform1i(u.uMap, 0);
+  gl.uniform1i(u.uMap2, 1);
+
+  gl.disable(gl.DEPTH_TEST);
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+  const anisoExt =
+    gl.getExtension("EXT_texture_filter_anisotropic") ||
+    gl.getExtension("WEBKIT_EXT_texture_filter_anisotropic");
+  const maxAniso = anisoExt ? Math.min(4, gl.getParameter(anisoExt.MAX_TEXTURE_MAX_ANISOTROPY_EXT) || 1) : 1;
+
+  const textures = [];
+  function createTexture(sourceCanvas) {
+    const tex = gl.createTexture();
+    textures.push(tex);
+    uploadTexture(tex, sourceCanvas);
+    return tex;
+  }
+
+  function uploadTexture(tex, sourceCanvas) {
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, sourceCanvas);
+    if (isWebGL2) {
+      gl.generateMipmap(gl.TEXTURE_2D);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+      if (anisoExt && maxAniso > 1) {
+        gl.texParameterf(gl.TEXTURE_2D, anisoExt.TEXTURE_MAX_ANISOTROPY_EXT, maxAniso);
+      }
+    } else {
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    }
+  }
+
+  return {
+    gl,
+    u,
+    indexCount: indices.length,
+    createTexture,
+    uploadTexture,
+    setClear(rgb) {
+      gl.clearColor(rgb[0], rgb[1], rgb[2], 1);
+    },
+    resize(pw, ph) {
+      gl.viewport(0, 0, pw, ph);
+    },
+    destroy() {
+      for (const tex of textures) gl.deleteTexture(tex);
+      gl.deleteBuffer(vbo);
+      gl.deleteBuffer(ibo);
+      gl.deleteProgram(prog);
+      gl.deleteShader(vs);
+      gl.deleteShader(fs);
+    },
+  };
+}
 
 function buildUnits() {
   const one = (kind, h, cols = 1, extra = {}) => ({
@@ -148,112 +385,448 @@ function pack(units) {
   return { placed, W, H };
 }
 
+function loadImage(src) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.decoding = "async";
+    img.onload = () => resolve(img);
+    img.onerror = () => resolve(null);
+    img.src = src;
+  });
+}
+
+function parseSvgList(html) {
+  const matches = String(html || "").match(/<svg[\s\S]*?<\/svg>/gi) || [];
+  return matches.map((svgStr) => {
+    const wM = svgStr.match(/\bwidth="([\d.]+)"/);
+    const hM = svgStr.match(/\bheight="([\d.]+)"/);
+    const w = wM ? parseFloat(wM[1]) : 466;
+    const h = hM ? parseFloat(hM[1]) : 100;
+    const src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgStr)}`;
+    return { src, w, h };
+  });
+}
+
 const clockFmt = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false });
 const clockSecFmt = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" });
 const fmtCoord = (v) => (v < 0 ? "\u2212" : "+") + String(Math.abs(Math.round(v)) % 10000).padStart(4, "0");
 
+// Typography canvas helpers
+const fnt = (weight, size, fam, style = "") => `${style ? `${style} ` : ""}${weight} ${size}px ${fam}`;
+function setSpacing(ctx, px) {
+  if ("letterSpacing" in ctx) ctx.letterSpacing = `${px}px`;
+}
+function inkWidth(ctx, text) {
+  const m = ctx.measureText(text);
+  const w = (m.actualBoundingBoxLeft ?? 0) + (m.actualBoundingBoxRight ?? 0);
+  return Math.max(m.width, w);
+}
+function fitText(ctx, text, weight, size, fam, maxW, style = "") {
+  let s = size;
+  ctx.font = fnt(weight, s, fam, style);
+  let tw = inkWidth(ctx, text);
+  for (let k = 0; k < 4 && tw > maxW; k += 1) {
+    s *= (maxW / tw) * 0.99;
+    ctx.font = fnt(weight, s, fam, style);
+    tw = inkWidth(ctx, text);
+  }
+  return s;
+}
+function drawMono(ctx, text, x, y, color, align = "left", size = 14, maxW = Infinity) {
+  const t = String(text).toUpperCase();
+  ctx.fillStyle = color;
+  ctx.textBaseline = "alphabetic";
+  ctx.textAlign = align;
+  setSpacing(ctx, 1.4);
+  fitText(ctx, t, 500, size, FONTS.mono, maxW);
+  ctx.fillText(t, x, y);
+  const w = inkWidth(ctx, t);
+  setSpacing(ctx, 0);
+  ctx.textAlign = "left";
+  return w;
+}
+function drawWrap(ctx, text, x, y, maxW, lh) {
+  const words = String(text).split(" ");
+  let line = "";
+  let cy = y;
+  for (const word of words) {
+    const test = line ? `${line} ${word}` : word;
+    if (inkWidth(ctx, test) > maxW && line) {
+      ctx.fillText(line, x, cy);
+      line = word;
+      cy += lh;
+    } else {
+      line = test;
+    }
+  }
+  if (line) ctx.fillText(line, x, cy);
+  return cy + lh;
+}
+function drawPill(ctx, text, x, y, fillBg, textColor, strokeColor) {
+  ctx.font = fnt(600, 18, FONTS.sans);
+  const tw = ctx.measureText(text).width;
+  const pw = Math.ceil(tw + 44);
+  const ph = 46;
+  ctx.beginPath();
+  ctx.roundRect(x, y, pw, ph, ph / 2);
+  if (fillBg) {
+    ctx.fillStyle = fillBg;
+    ctx.fill();
+  }
+  if (strokeColor) {
+    ctx.strokeStyle = strokeColor;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+  ctx.fillStyle = textColor;
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "center";
+  ctx.fillText(text, x + pw / 2, y + ph / 2 + 1);
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+  return { x, y, w: pw, h: ph };
+}
+
 export function initCanvas(o) {
-  const { stage, world } = o;
+  const { stage } = o;
   const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
   const coarse = matchMedia("(pointer: coarse)").matches;
   const canAim = matchMedia("(any-pointer: fine)").matches;
   o.hint.textContent = coarse ? "SWIPE TO EXPLORE" : "DRAG \u00b7 ARROWS \u00b7 \u21b5 OPEN";
 
+  const canvasEl = document.createElement("canvas");
+  stage.replaceChildren(canvasEl);
+
+  const glCtx = createGL(canvasEl);
+  const ctx2d = glCtx ? null : canvasEl.getContext("2d", { alpha: false });
+
+  let P = PALETTES[o.getTheme?.() === "light" ? "light" : "dark"];
+  glCtx?.setClear(P.clear);
+
   const { placed, W, H } = pack(buildUnits());
 
-  // ---- tile content ----
-  function specInner(spec) {
-    const r = o.getSpecimen(spec.key);
-    const label = spec.key === "live" ? '<span class="ft-live-label">YOUR README STACK / LIVE</span>' : "";
-    return `${label}<div class="ft-spec-stage stage-gh-${r.stage}">${r.html}</div>`;
+  let vw = 1;
+  let vh = 1;
+  let dpr = 1;
+  let zoom = 1;
+  let zoomEff = 1;
+  let texScale = 1.5;
+
+  function resize() {
+    vw = Math.max(1, stage.clientWidth);
+    vh = Math.max(1, stage.clientHeight);
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvasEl.width = Math.round(vw * dpr);
+    canvasEl.height = Math.round(vh * dpr);
+    glCtx?.resize(canvasEl.width, canvasEl.height);
+    zoom = clamp(vw / CFG.zoomRef, CFG.minZoom, 1);
+    if (vw < CFG.heroFillBelow) zoom = Math.min(zoom, (CFG.heroFill * vw) / C2);
+    dirty = true;
   }
 
-  function fillerHtml(n) {
-    const v = n % 5;
-    if (v === 0) return '<p class="ft-filler-big">Ship it.</p>';
-    if (v === 1) return '<p class="ft-filler-glyph">&gt;_</p>';
-    if (v === 2) {
-      const words = ["Typing", "Info", "Streak", "Link"];
-      return `<div class="ft-filler-stack">${words
-        .map((w, i) => `<span class="${i === n % 4 ? "is-lit" : ""}">${w}</span>`)
-        .join("")}</div>`;
-    }
-    if (v === 3) {
-      return '<p class="ft-mono ft-muted">termcard (n.)</p><p class="ft-title">Zero<br>server.</p>';
-    }
-    const arrows = ["\u2196", "\u2191", "\u2197", "\u2190", "\u00b7", "\u2192", "\u2199", "\u2193", "\u2198"];
-    return `<p class="ft-mono ft-muted">No edges</p><div class="ft-compass">${arrows.map((a) => `<b>${a}</b>`).join("")}</div>`;
+  let dirty = true;
+  resize();
+  texScale = clamp(dpr * zoom * 1.15, 0.85, 2);
+
+  let faviconImg = null;
+  const specImgCache = new Map();
+
+  function makeTileCanvas(w, h) {
+    const c = document.createElement("canvas");
+    c.width = Math.max(1, Math.round(w * texScale));
+    c.height = Math.max(1, Math.round(h * texScale));
+    const ctx = c.getContext("2d");
+    return { c, ctx };
   }
 
-  function describe(t) {
-    switch (t.kind) {
-      case "hero":
-        return {
-          cls: "ft-hero",
-          html:
-            '<div class="ft-top"><p class="ft-mono">Open source action</p><p class="ft-mono">MIT / Python 3</p></div>' +
-            '<div><div class="ft-logo"><i>term</i>card</div><p class="ft-by">by <em>bagasadh</em></p></div>' +
-            '<div><p class="ft-line">Terminal-styled SVG cards for your GitHub profile. Pick a theme, type your details, copy into GitHub.</p>' +
-            `<div class="ft-chips"><span class="ft-chip ft-chip-solid" data-action="builder">Build your cards</span><span class="ft-chip" data-href="${MARKETPLACE}">Marketplace \u2197</span></div></div>`,
-        };
-      case "intro":
-        return {
-          cls: "ft-dark ft-intro",
-          html:
-            '<p class="ft-mono ft-muted">About termcard</p>' +
-            '<p class="ft-statement">No hosted server, no API quotas.<em>One JSON file and a GitHub Action.</em></p>' +
-            '<p class="ft-mono ft-muted">Typing \u00b7 Info \u00b7 Streak \u00b7 Link</p>',
-        };
-      case "clock":
-        return {
-          cls: "ft-dark ft-clock",
-          html:
-            '<p class="ft-top ft-mono ft-muted"><span>Your local time</span><span class="ft-dot"></span></p>' +
-            `<p class="ft-clock-time">${clockFmt.format(new Date())}</p>`,
-        };
-      case "setupHead":
-        return {
-          cls: "ft-bone ft-intro",
-          html: '<p class="ft-mono ft-muted">No terminal needed / 04</p><p class="ft-title">Add to GitHub in 4 steps.</p>',
-        };
-      case "step":
-        return {
-          cls: `${t.step.dark ? "ft-dark" : "ft-bone"} ft-step`,
-          html: `<p class="ft-mono ft-muted">Step ${t.step.n} / 04</p><div><h3>${t.step.h}</h3><p>${t.step.p}</p></div>`,
-        };
-      case "presetsHead":
-        return {
-          cls: "ft-dark ft-intro",
-          html: '<p class="ft-mono ft-muted">Presets / 06</p><p class="ft-title">Pick a <span class="ft-serif">look.</span></p>',
-        };
-      case "specimen":
-        return { cls: "ft-specimen", html: specInner(t.spec), dynamic: true };
-      case "caption":
-        return {
-          cls: "ft-caption",
-          html: `<span class="ft-cap-idx">${t.spec.n}</span><span class="ft-cap-title">${t.spec.title}</span><span class="ft-cap-tag">${t.spec.tag} \u2197</span>`,
-        };
-      case "cta":
-        return {
-          cls: "ft-bone ft-cta",
-          html:
-            '<div class="ft-top"><p class="ft-mono ft-muted">Interactive workbench</p><p class="ft-mono ft-muted">Free / No sign-in</p></div>' +
-            '<p class="ft-cta-title">Ready to build<em>your cards?</em></p>' +
-            `<div class="ft-chips"><span class="ft-chip ft-chip-solid" data-action="builder">Open the builder</span><span class="ft-chip" data-href="${REPO}">View source \u2197</span></div>`,
-        };
-      case "hello":
-        return {
-          cls: "ft-bone ft-hello",
-          html:
-            '<div class="ft-top"><p class="ft-mono ft-muted">Say hello</p><span class="ft-serif">\u2197</span></div>' +
-            '<p class="ft-hello-link">bagasadh/termcard</p>',
-        };
-      default: {
-        const v = t.n % 5;
-        const cls = v === 0 ? "ft-filler ft-filler-ghost" : v === 1 || v === 4 ? "ft-filler ft-bone" : "ft-filler ft-dark";
-        const left = v === 2 ? " ft-filler-left" : v === 3 || v === 4 ? " ft-filler-left" : "";
-        return { cls: cls + left, html: fillerHtml(t.n) };
+  function drawCardFrame(ctx, w, h, bg, border) {
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+    if (border) {
+      ctx.strokeStyle = border;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.roundRect(1, 1, w - 2, h - 2, Math.max(0, CFG.radius - 1));
+      ctx.stroke();
+    }
+  }
+
+  function paintTile(tile, ctx, w, h, hot = false) {
+    ctx.setTransform(texScale, 0, 0, texScale, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+
+    if (tile.kind === "hero") {
+      drawCardFrame(ctx, w, h, P.bone, P.boneBorder);
+      drawMono(ctx, "Open source action", PAD + 4, 52, P.boneMuted, "left", 14);
+      drawMono(ctx, "MIT / Python 3", w - PAD - 4, 52, P.boneMuted, "right", 14);
+
+      let lx = PAD + 4;
+      const logoBaseY = 278;
+      if (faviconImg) {
+        const iconSize = 86;
+        ctx.save();
+        ctx.beginPath();
+        ctx.roundRect(lx, logoBaseY - iconSize + 10, iconSize, iconSize, 14);
+        ctx.clip();
+        ctx.drawImage(faviconImg, lx, logoBaseY - iconSize + 10, iconSize, iconSize);
+        ctx.restore();
+        lx += iconSize + 22;
       }
+
+      ctx.textBaseline = "alphabetic";
+      ctx.font = fnt(400, 122, FONTS.serif, "italic");
+      ctx.fillStyle = P.boneInk;
+      ctx.fillText("term", lx, logoBaseY);
+      const tw = ctx.measureText("term").width;
+      setSpacing(ctx, -5);
+      ctx.font = fnt(700, 114, FONTS.mono);
+      ctx.fillText("card", lx + tw + 4, logoBaseY);
+      setSpacing(ctx, 0);
+
+      ctx.font = fnt(400, 28, FONTS.sans);
+      ctx.fillStyle = P.boneMuted;
+      ctx.fillText("by ", PAD + 4, logoBaseY + 48);
+      const byW = ctx.measureText("by ").width;
+      ctx.font = fnt(400, 36, FONTS.serif, "italic");
+      ctx.fillStyle = P.boneInk;
+      ctx.fillText("bagasadh", PAD + 4 + byW, logoBaseY + 48);
+
+      ctx.font = fnt(500, 30, FONTS.sans);
+      ctx.fillStyle = P.boneInk;
+      setSpacing(ctx, -0.6);
+      drawWrap(ctx, "Terminal-styled SVG cards for GitHub READMEs. Pick a theme, edit details, copy into GitHub.", PAD + 4, h - 166, w - PAD * 2 - 8, 38);
+      setSpacing(ctx, 0);
+
+      const b1 = drawPill(ctx, "Build your cards", PAD + 4, h - 82, P.boneInk, P.bone, P.boneInk);
+      const b2 = drawPill(ctx, "Marketplace \u2197", PAD + 4 + b1.w + 12, h - 82, null, P.boneInk, P.boneInk);
+      drawMono(ctx, "Drag \u00b7 fling \u00b7 tap", w - PAD - 4, h - 52, P.boneMuted, "right", 14);
+      tile.chips = [
+        { ...b1, action: { type: "builder" }, label: "Open builder <b>\u2197</b>" },
+        { ...b2, action: { type: "href", url: MARKETPLACE }, label: "GitHub Marketplace <b>\u2197</b>" },
+      ];
+      return;
+    }
+
+    if (tile.kind === "intro") {
+      drawCardFrame(ctx, w, h, P.surface, P.hairline);
+      drawMono(ctx, "About termcard", PAD, 50, P.muted, "left", 14);
+      ctx.fillStyle = P.text;
+      ctx.font = fnt(500, 38, FONTS.sans);
+      setSpacing(ctx, -1);
+      const ny = drawWrap(ctx, "No hosted server, no API quotas.", PAD, 148, w - PAD * 2, 46);
+      ctx.font = fnt(400, 44, FONTS.serif, "italic");
+      drawWrap(ctx, "One JSON file and a GitHub Action.", PAD, ny + 14, w - PAD * 2, 48);
+      setSpacing(ctx, 0);
+      drawMono(ctx, "Typing \u00b7 Info \u00b7 Streak \u00b7 Link", PAD, h - 36, P.muted, "left", 13);
+      return;
+    }
+
+    if (tile.kind === "clock") {
+      drawCardFrame(ctx, w, h, P.surface, P.hairline);
+      drawMono(ctx, "Your local time", PAD, 50, P.muted, "left", 14);
+      ctx.fillStyle = P.text;
+      ctx.beginPath();
+      ctx.arc(w - PAD - 6, 44, 6, 0, Math.PI * 2);
+      ctx.fill();
+      setSpacing(ctx, -4);
+      fitText(ctx, clockFmt.format(new Date()), 500, 100, FONTS.sans, w - PAD * 2);
+      ctx.fillStyle = P.text;
+      ctx.fillText(clockFmt.format(new Date()), PAD, h - 36);
+      setSpacing(ctx, 0);
+      return;
+    }
+
+    if (tile.kind === "setupHead") {
+      drawCardFrame(ctx, w, h, P.bone, P.boneBorder);
+      drawMono(ctx, "No terminal needed / 04", PAD, 50, P.boneMuted, "left", 14);
+      ctx.fillStyle = P.boneInk;
+      setSpacing(ctx, -2.5);
+      ctx.font = fnt(700, 56, FONTS.sans);
+      drawWrap(ctx, "Add to GitHub in 4 steps.", PAD, 128, w - PAD * 2, 58);
+      setSpacing(ctx, 0);
+      return;
+    }
+
+    if (tile.kind === "step") {
+      const dark = tile.step.dark;
+      drawCardFrame(ctx, w, h, dark ? P.surface : P.bone, dark ? P.hairline : P.boneBorder);
+      drawMono(ctx, `Step ${tile.step.n} / 04`, PAD, 50, dark ? P.muted : P.boneMuted, "left", 14);
+      ctx.fillStyle = dark ? P.text : P.boneInk;
+      setSpacing(ctx, -1.6);
+      ctx.font = fnt(700, 42, FONTS.sans);
+      const ny = drawWrap(ctx, tile.step.h, PAD, 122, w - PAD * 2, 46);
+      setSpacing(ctx, -0.2);
+      ctx.font = fnt(400, 21, FONTS.sans);
+      ctx.fillStyle = dark ? P.muted : P.boneMuted;
+      drawWrap(ctx, tile.step.p, PAD, ny + 18, w - PAD * 2, 31);
+      setSpacing(ctx, 0);
+      return;
+    }
+
+    if (tile.kind === "presetsHead") {
+      drawCardFrame(ctx, w, h, P.surface, P.hairline);
+      drawMono(ctx, "Presets / 06", PAD, 50, P.muted, "left", 14);
+      ctx.fillStyle = P.text;
+      setSpacing(ctx, -2.2);
+      ctx.font = fnt(600, 58, FONTS.sans);
+      ctx.fillText("Pick a", PAD, h - 98);
+      setSpacing(ctx, 0);
+      ctx.font = fnt(400, 72, FONTS.serif, "italic");
+      ctx.fillText("look.", PAD, h - 36);
+      return;
+    }
+
+    if (tile.kind === "caption") {
+      ctx.fillStyle = P.bg;
+      ctx.fillRect(0, 0, w, h);
+      const s = tile.spec;
+      drawMono(ctx, s.n, CAP_PAD, 36, hot ? P.text : P.muted, "left", 14);
+      const tagW = drawMono(ctx, `${s.tag} \u2197`, w - CAP_PAD, 36, hot ? P.text : P.muted, "right", 14);
+      const idxW = s.n.length > 2 ? 56 : 44;
+      const titleMaxW = Math.max(80, w - idxW - tagW - 28);
+      ctx.fillStyle = P.text;
+      setSpacing(ctx, -0.5);
+      fitText(ctx, s.title, 600, 25, FONTS.sans, titleMaxW);
+      ctx.fillText(s.title, idxW, 38);
+      const tw = inkWidth(ctx, s.title);
+      setSpacing(ctx, 0);
+      if (hot) {
+        ctx.fillStyle = P.text;
+        ctx.fillRect(idxW, 46, Math.min(tw, titleMaxW), 2);
+      }
+      return;
+    }
+
+    if (tile.kind === "specimen") {
+      const entry = specImgCache.get(tile.spec.key);
+      const stageBg = entry?.stage === "light" ? "#ffffff" : "#0d1117";
+      const frameBorder = entry?.stage === "light" ? "#d0d7de" : "#30363d";
+      drawCardFrame(ctx, w, h, stageBg, frameBorder);
+
+      if (tile.spec.key === "live") {
+        drawMono(ctx, "Your README stack / Live", 20, 32, entry?.stage === "light" ? "#57606a" : "#8b949e", "left", 12);
+      }
+
+      const imgs = entry?.imgs || [];
+      if (imgs.length) {
+        const padX = w > 500 ? 48 : 26;
+        const padY = tile.spec.key === "live" ? 48 : 30;
+        const availW = w - padX * 2;
+        const availH = h - padY * 2;
+        const gap = 14;
+        let totalH = 0;
+        const scaled = imgs.map((item) => {
+          const sw = Math.min(availW, item.w * (w > 500 ? 1.35 : 0.88));
+          const sh = (item.h / item.w) * sw;
+          totalH += sh;
+          return { img: item.img, sw, sh };
+        });
+        totalH += gap * Math.max(0, scaled.length - 1);
+        const fitScale = totalH > availH ? availH / totalH : 1;
+        const finalH = totalH * fitScale;
+        let cy = (h - finalH) / 2 + (tile.spec.key === "live" ? 8 : 0);
+        for (const item of scaled) {
+          const dw = item.sw * fitScale;
+          const dh = item.sh * fitScale;
+          ctx.drawImage(item.img, (w - dw) / 2, cy, dw, dh);
+          cy += dh + gap * fitScale;
+        }
+      } else {
+        drawMono(ctx, tile.spec.title, w / 2, h / 2, "#8b949e", "center", 16);
+      }
+      return;
+    }
+
+    if (tile.kind === "cta") {
+      drawCardFrame(ctx, w, h, P.bone, P.boneBorder);
+      drawMono(ctx, "Interactive workbench", PAD + 4, 52, P.boneMuted, "left", 14);
+      drawMono(ctx, "Free / No sign-in", w - PAD - 4, 52, P.boneMuted, "right", 14);
+      ctx.fillStyle = P.boneInk;
+      setSpacing(ctx, -3.5);
+      ctx.font = fnt(700, 82, FONTS.sans);
+      ctx.fillText("Ready to build", PAD + 4, 178);
+      setSpacing(ctx, 0);
+      ctx.font = fnt(400, 96, FONTS.serif, "italic");
+      ctx.fillText("your cards?", PAD + 4, 266);
+
+      const b1 = drawPill(ctx, "Open the builder", PAD + 4, h - 86, P.boneInk, P.bone, P.boneInk);
+      const b2 = drawPill(ctx, "View source \u2197", PAD + 4 + b1.w + 12, h - 86, null, P.boneInk, P.boneInk);
+      tile.chips = [
+        { ...b1, action: { type: "builder" }, label: "Open builder <b>\u2197</b>" },
+        { ...b2, action: { type: "href", url: REPO }, label: "GitHub source <b>\u2197</b>" },
+      ];
+      return;
+    }
+
+    if (tile.kind === "hello") {
+      drawCardFrame(ctx, w, h, P.bone, P.boneBorder);
+      drawMono(ctx, "Say hello", PAD, 50, P.boneMuted, "left", 14);
+      ctx.font = fnt(400, 26, FONTS.serif, "italic");
+      ctx.fillStyle = P.boneInk;
+      ctx.textAlign = "right";
+      ctx.fillText("\u2197", w - PAD, 52);
+      ctx.textAlign = "left";
+      setSpacing(ctx, -1);
+      fitText(ctx, "bagasadh/termcard", 600, 34, FONTS.sans, w - PAD * 2);
+      ctx.fillStyle = P.boneInk;
+      ctx.fillText("bagasadh/termcard", PAD, h - 40);
+      setSpacing(ctx, 0);
+      return;
+    }
+
+    // Fillers (5 variants)
+    const v = tile.n % 5;
+    if (v === 0) {
+      drawCardFrame(ctx, w, h, P.bg, P.dim);
+      ctx.fillStyle = P.text;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      fitText(ctx, "Ship it.", 400, Math.min(82, h * 0.4), FONTS.serif, w - PAD * 2, "italic");
+      ctx.fillText("Ship it.", w / 2, h / 2);
+      ctx.textAlign = "left";
+      ctx.textBaseline = "alphabetic";
+    } else if (v === 1) {
+      drawCardFrame(ctx, w, h, P.bone, P.boneBorder);
+      ctx.fillStyle = P.boneInk;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.font = fnt(700, Math.min(130, h * 0.55), FONTS.mono);
+      ctx.fillText(">_", w / 2, h / 2);
+      ctx.textAlign = "left";
+      ctx.textBaseline = "alphabetic";
+    } else if (v === 2) {
+      drawCardFrame(ctx, w, h, P.surface, P.hairline);
+      const words = ["Typing", "Info", "Streak", "Link"];
+      const lh = Math.min(52, (h - PAD * 2) / 4);
+      setSpacing(ctx, -1.2);
+      words.forEach((wd, i) => {
+        ctx.fillStyle = i === tile.n % 4 ? P.text : P.dim;
+        ctx.font = fnt(600, lh * 0.88, FONTS.sans);
+        ctx.fillText(wd, PAD, h / 2 - lh * 1.3 + lh * i);
+      });
+      setSpacing(ctx, 0);
+    } else if (v === 3) {
+      drawCardFrame(ctx, w, h, P.surface, P.hairline);
+      drawMono(ctx, "termcard (n.)", PAD, 50, P.muted, "left", 14);
+      ctx.fillStyle = P.text;
+      setSpacing(ctx, -2);
+      ctx.font = fnt(700, Math.min(58, h * 0.3), FONTS.sans);
+      ctx.fillText("Zero server.", PAD, h - 38);
+      setSpacing(ctx, 0);
+    } else {
+      drawCardFrame(ctx, w, h, P.bone, P.boneBorder);
+      drawMono(ctx, "No edges", PAD, 50, P.boneMuted, "left", 14);
+      const arrows = ["\u2196", "\u2191", "\u2197", "\u2190", "\u00b7", "\u2192", "\u2199", "\u2193", "\u2198"];
+      const step = Math.min(w, h - 50) / 4.2;
+      ctx.font = fnt(400, step * 0.6, FONTS.sans);
+      ctx.fillStyle = P.boneInk;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      arrows.forEach((a, i) => {
+        ctx.fillText(a, w / 2 + ((i % 3) - 1) * step, h / 2 + 12 + (Math.floor(i / 3) - 1) * step);
+      });
+      ctx.textAlign = "left";
+      ctx.textBaseline = "alphabetic";
     }
   }
 
@@ -271,61 +844,59 @@ export function initCanvas(o) {
   };
 
   const tiles = placed.map((p) => {
-    const d = describe(p);
-    return {
+    const main = makeTileCanvas(p.w, p.h);
+    const alt = p.kind === "caption" ? makeTileCanvas(p.w, p.h) : null;
+    const tile = {
       ...p,
       cx: p.x + p.w / 2,
       cy: p.y + p.h / 2,
-      cls: d.cls,
-      html: d.html,
-      dynamic: Boolean(d.dynamic),
       action: ACTIONS[p.kind] ? ACTIONS[p.kind](p) : null,
       label: LABELS[p.kind] ? LABELS[p.kind](p) : null,
-      els: [],
-      shown: 0,
+      chips: null,
+      canvas: main.c,
+      ctx: main.ctx,
+      tex: null,
+      canvas2: alt ? alt.c : null,
+      ctx2: alt ? alt.ctx : null,
+      tex2: null,
+      copies: [],
+      hover: 0,
+      pulse: 0,
+      reveal: reduced ? 1 : 0,
+      revealDelay: 0,
     };
+    return tile;
   });
+
+  const hero = tiles.find((t) => t.kind === "hero");
   const clockTile = tiles.find((t) => t.kind === "clock");
-
-  let hotUnits = new Set();
-  function makeEl(tile) {
-    const el = document.createElement("div");
-    el.className = `ft ${tile.cls}`;
-    el.style.width = `${tile.w}px`;
-    el.style.height = `${tile.h}px`;
-    el.innerHTML = tile.html;
-    el._tile = tile;
-    if (tile.unit !== null && hotUnits.has(tile.unit)) el.classList.add("is-hot");
-    world.appendChild(el);
-    tile.els.push(el);
-    return el;
-  }
-
-  // ---- view state ----
-  let vw = 1;
-  let vh = 1;
-  let zoom = 1;
-  let zoomEff = 1;
-  const cam = { x: 0, y: 0 };
+  let lastClockText = "";
+  const cam = { x: hero.cx, y: hero.cy };
+  const prev = { x: hero.cx, y: hero.cy };
   const vel = { x: 0, y: 0 };
-  const prev = { x: 0, y: 0 };
   const sv = { x: 0, y: 0 };
   let speedS = 0;
   let flight = null;
   let dragging = false;
   let lastInput = -1e9;
   let now = 0;
+  let revealStart = -1;
   let last = performance.now();
   let frame = 0;
   let raf = 0;
   let down = null;
   let ptr = null;
   let hovered = null;
+  let hoveredChip = null;
   let aimed = null;
-  let pulse = { units: new Set(), until: 0 };
   let presetIdx = 0;
   let lastHeading = null;
-  let lastWorld = "";
+  let fieldMoving = false;
+  let labelX = -999;
+  let labelY = -999;
+  let labelTx = -999;
+  let labelTy = -999;
+  let labelOn = false;
   const pending = { x: 0, y: 0 };
   const samples = [];
   const keys = new Set();
@@ -335,85 +906,139 @@ export function initCanvas(o) {
     cleanups.push(() => target.removeEventListener(type, fn, opts));
   };
 
-  const hero = tiles.find((t) => t.kind === "hero");
-  cam.x = prev.x = hero.cx;
-  cam.y = prev.y = hero.cy;
-
-  function resize() {
-    vw = stage.clientWidth;
-    vh = stage.clientHeight;
-    zoom = clamp(vw / CFG.zoomRef, CFG.minZoom, 1);
-    if (vw < CFG.heroFillBelow) zoom = Math.min(zoom, (CFG.heroFill * vw) / C2);
+  for (const t of tiles) {
+    t.revealDelay = 0.08 + Math.hypot(t.cx - hero.cx, t.cy - hero.cy) / 3000;
   }
-  resize();
+
+  function uploadTile(tile) {
+    if (!glCtx) return;
+    if (!tile.tex) tile.tex = glCtx.createTexture(tile.canvas);
+    else glCtx.uploadTexture(tile.tex, tile.canvas);
+    if (tile.canvas2) {
+      if (!tile.tex2) tile.tex2 = glCtx.createTexture(tile.canvas2);
+      else glCtx.uploadTexture(tile.tex2, tile.canvas2);
+    }
+  }
+
+  function repaintTile(tile) {
+    paintTile(tile, tile.ctx, tile.w, tile.h, false);
+    if (tile.ctx2) paintTile(tile, tile.ctx2, tile.w, tile.h, true);
+    uploadTile(tile);
+    dirty = true;
+  }
+
+  async function loadSpecimenKey(key) {
+    const r = o.getSpecimen(key, { staticTyping: true });
+    const parsed = parseSvgList(r.html);
+    const loaded = await Promise.all(
+      parsed.map(async (item) => {
+        const img = await loadImage(item.src);
+        return img ? { img, w: item.w, h: item.h } : null;
+      })
+    );
+    specImgCache.set(key, {
+      stage: r.stage,
+      imgs: loaded.filter(Boolean),
+    });
+    for (const t of tiles) {
+      if (t.kind === "specimen" && t.spec.key === key) repaintTile(t);
+    }
+  }
+
+  function repaintAllText() {
+    for (const t of tiles) {
+      if (t.kind !== "specimen") repaintTile(t);
+    }
+  }
+
+  // Initial paint + async web fonts, favicon, and SVG specimens
+  for (const t of tiles) repaintTile(t);
+  revealStart = 0;
+
+  Promise.all([
+    document.fonts?.ready?.catch(() => {}) ?? Promise.resolve(),
+    loadImage("/favicon.svg").then((img) => {
+      faviconImg = img;
+    }),
+  ]).then(() => {
+    repaintAllText();
+  });
+
+  Promise.all([...SPECS.map((s) => s.key), "live"].map(loadSpecimenKey));
+
   on(window, "resize", resize);
 
   const diag = () => Math.hypot(vw, vh) / zoom;
-  const ease = (k) => (k < 0.5 ? 2 * k * k : 1 - ((-2 * k + 2) ** 2) / 2);
 
-  // ---- hover / aim / hot units ----
-  const tileOf = (el) => el?.closest?.(".ft")?._tile ?? null;
-  const interactive = (t, el) => Boolean(el?.closest?.("[data-action],[data-href]")) || Boolean(t?.action);
+  // Pure-math hit test (0 DOM calls, 0 layout reflows)
+  function hitAt(sx, sy) {
+    const wx = (sx - vw / 2) / zoomEff;
+    const wy = (sy - vh / 2) / zoomEff;
+    for (let i = tiles.length - 1; i >= 0; i -= 1) {
+      const t = tiles[i];
+      for (const [cx, cy] of t.copies) {
+        if (Math.abs(wx - cx) <= t.w / 2 && Math.abs(wy - cy) <= t.h / 2) {
+          if (t.chips) {
+            const lx = wx - (cx - t.w / 2);
+            const ly = wy - (cy - t.h / 2);
+            for (const chip of t.chips) {
+              if (lx >= chip.x && lx <= chip.x + chip.w && ly >= chip.y && ly <= chip.y + chip.h) {
+                return { tile: t, chip, action: chip.action, label: chip.label };
+              }
+            }
+          }
+          if (t.action) return { tile: t, chip: null, action: t.action, label: t.label };
+          return null;
+        }
+      }
+    }
+    return null;
+  }
 
-  function applyHot() {
-    const next = new Set(pulse.units);
-    if (hovered?.unit != null) next.add(hovered.unit);
-    if (aimed?.unit != null) next.add(aimed.unit);
-    const key = [...next].sort().join(",");
-    if (key === lastWorld) return;
-    lastWorld = key;
-    hotUnits = next;
-    for (const t of tiles) {
-      if (t.unit === null) continue;
-      const hot = next.has(t.unit);
-      for (const el of t.els) el.classList.toggle("is-hot", hot);
+  function setHover(hit, x, y) {
+    const nextTile = hit?.tile ?? null;
+    const nextChip = hit?.chip ?? null;
+    const appearing = Boolean(hit) && !hovered && !hoveredChip;
+    if (nextTile !== hovered || nextChip !== hoveredChip) {
+      if (hit) o.sound.tick();
+      hovered = nextTile;
+      hoveredChip = nextChip;
+      stage.classList.toggle("is-link", Boolean(hit));
+      labelOn = Boolean(hit?.label);
+      o.label.classList.toggle("is-on", labelOn);
+      if (hit?.label) o.label.innerHTML = hit.label;
+    }
+    if (!hit || x === undefined) return;
+    labelTx = x + 18;
+    labelTy = y + 18;
+    if (appearing || reduced) {
+      labelX = labelTx;
+      labelY = labelTy;
+      o.label.style.transform = `translate3d(${labelX.toFixed(1)}px, ${labelY.toFixed(1)}px, 0)`;
     }
   }
 
-  function setHover(t, el, x, y) {
-    const link = interactive(t, el);
-    const target = link ? t : null;
-    if (target !== hovered) {
-      if (target) o.sound.tick();
-      hovered = target;
-      stage.classList.toggle("is-link", link);
-      const text = target?.label;
-      o.label.classList.toggle("is-on", Boolean(text));
-      if (text) o.label.innerHTML = text;
-    }
-    stage.classList.toggle("is-link", link);
-    if (target?.label && x !== undefined) {
-      o.label.style.transform = `translate(${x + 18}px, ${y + 18}px)`;
-    }
-    applyHot();
-  }
-
-  function updateHoverFromPoint() {
+  function updateHover() {
     if (!ptr || dragging || o.isSheetOpen() || fieldMoving) {
-      if (hovered) setHover(null, null);
+      if (hovered || hoveredChip) setHover(null);
       return;
     }
-    const el = document.elementFromPoint(ptr.x, ptr.y);
-    const t = el && stage.contains(el) ? tileOf(el) : null;
-    setHover(t, el, ptr.x, ptr.y);
+    setHover(hitAt(ptr.x, ptr.y), ptr.x, ptr.y);
   }
 
   function updateAim() {
-    let t = null;
-    if (canAim && !fieldMoving && !dragging && !o.isSheetOpen() && !hovered) {
-      const el = document.elementFromPoint(vw / 2, vh / 2);
-      const c = el && stage.contains(el) ? tileOf(el) : null;
-      t = c?.action ? c : null;
-    }
+    const hit = canAim && !fieldMoving && !dragging && !o.isSheetOpen() && !hovered ? hitAt(vw / 2, vh / 2) : null;
+    const t = hit?.tile ?? null;
     if (t === aimed) return;
     aimed = t;
-    o.aim.classList.toggle("is-on", Boolean(t));
-    if (t) o.aim.innerHTML = `<b>\u21b5</b> ${t.label ?? "Open"}`.replace(/<b>[^<]*<\/b>\s*$/, "").trim();
-    applyHot();
+    o.aim.classList.toggle("is-on", Boolean(hit));
+    if (hit) {
+      const clean = (hit.label || "Open").replace(/<b>[^<]*<\/b>\s*$/, "").trim();
+      o.aim.innerHTML = `<b>\u21b5</b> ${clean}`;
+    }
   }
 
-  // ---- actions ----
-  function run(action) {
+  function runAction(action) {
     if (!action) return;
     if (action.type === "href") {
       window.open(action.url, "_blank", "noopener");
@@ -422,18 +1047,10 @@ export function initCanvas(o) {
     o.onAction(action);
   }
 
-  function activate(t, el) {
-    const chip = el?.closest?.("[data-action],[data-href]");
-    if (chip?.dataset.href) return run({ type: "href", url: chip.dataset.href });
-    if (chip?.dataset.action === "builder") return run({ type: "builder" });
-    if (t?.action) return run(t.action);
-    return undefined;
-  }
-
-  // ---- flights ----
+  // Flights
   function flyTo(target, alignTop = false) {
     if (!target) return 0;
-    let tx = target.at ? target.at[0] : cam.x + wrapD(target.cx - cam.x, W);
+    const tx = target.at ? target.at[0] : cam.x + wrapD(target.cx - cam.x, W);
     let ty = target.at ? target.at[1] : cam.y + wrapD(target.cy - cam.y, H);
     if (alignTop) {
       const top = cam.y + wrapD(target.y - cam.y, H);
@@ -446,6 +1063,7 @@ export function initCanvas(o) {
     if (reduced) {
       cam.x = prev.x = tx;
       cam.y = prev.y = ty;
+      dirty = true;
       return 0;
     }
     const dur = Math.min(CFG.flyMaxDuration, CFG.flyDuration * Math.max(1, Math.sqrt(dist / diag())));
@@ -501,8 +1119,9 @@ export function initCanvas(o) {
       const large = all.filter((t) => t.w > C);
       const c = workTarget(large.length ? large : all);
       flyTo({ at: [cam.x + c.x, cam.y + c.y] });
-      pulse = { units: new Set(all.map((t) => t.unit)), until: now + 1.8 };
-      applyHot();
+      for (const t of tiles) {
+        if (t.spec === spec) t.pulse = 1.8;
+      }
       return;
     }
     if (name === "setup") {
@@ -517,13 +1136,13 @@ export function initCanvas(o) {
     flyTo(nearest(tiles.filter((t) => t.anchor === name)));
   }
 
-  // ---- input ----
+  // Input handlers
   on(stage, "pointerdown", (e) => {
     if (o.isSheetOpen() || !e.isPrimary) return;
     try {
       stage.setPointerCapture(e.pointerId);
     } catch {
-      // Pointer capture is optional.
+      // Optional pointer capture.
     }
     down = { lx: e.clientX, ly: e.clientY, t: performance.now(), moved: 0 };
     samples.length = 0;
@@ -533,15 +1152,12 @@ export function initCanvas(o) {
     vel.x = vel.y = 0;
     lastInput = now;
     stage.classList.add("is-dragging");
-    setHover(null, null);
+    setHover(null);
   });
 
   on(stage, "pointermove", (e) => {
     if (e.pointerType === "mouse") ptr = { x: e.clientX, y: e.clientY };
-    if (!down || !dragging) {
-      updateHoverFromPoint();
-      return;
-    }
+    if (!down || !dragging) return;
     const dx = e.clientX - down.lx;
     const dy = e.clientY - down.ly;
     down.lx = e.clientX;
@@ -578,11 +1194,10 @@ export function initCanvas(o) {
     dragging = false;
     stage.classList.remove("is-dragging");
     if (quick && e.type === "pointerup") {
-      const el = document.elementFromPoint(e.clientX, e.clientY);
-      const t = el && stage.contains(el) ? tileOf(el) : null;
-      if (t && interactive(t, el)) {
+      const hit = hitAt(e.clientX, e.clientY);
+      if (hit) {
         o.sound.tap();
-        activate(t, el);
+        runAction(hit.action);
       }
     }
   }
@@ -590,7 +1205,7 @@ export function initCanvas(o) {
   on(stage, "pointercancel", endDrag);
   on(stage, "pointerleave", () => {
     ptr = null;
-    setHover(null, null);
+    setHover(null);
   });
 
   on(
@@ -611,6 +1226,7 @@ export function initCanvas(o) {
       if (reduced) {
         cam.x += dx / zoomEff;
         cam.y += dy / zoomEff;
+        dirty = true;
         return;
       }
       vel.x += (dx * CFG.wheel) / zoomEff;
@@ -625,10 +1241,11 @@ export function initCanvas(o) {
     if (o.isSheetOpen() || document.querySelector("dialog[open]")) return;
     if (e.key === "Enter" || e.key === " ") {
       if (e.repeat || e.altKey || e.ctrlKey || e.metaKey || ownsKey(e)) return;
-      if (!aimed) return;
+      const hit = hitAt(vw / 2, vh / 2);
+      if (!hit) return;
       e.preventDefault();
       o.sound.tap();
-      run(aimed.action);
+      runAction(hit.action);
       return;
     }
     if (!DIRS[e.key] || ownsKey(e)) return;
@@ -639,6 +1256,7 @@ export function initCanvas(o) {
       const [dx, dy] = DIRS[e.key];
       cam.x += (dx * vw) / zoomEff / 3;
       cam.y += (dy * vh) / zoomEff / 3;
+      dirty = true;
       return;
     }
     keys.add(e.key);
@@ -646,29 +1264,58 @@ export function initCanvas(o) {
   on(window, "keyup", (e) => keys.delete(e.key));
   on(window, "blur", () => keys.clear());
 
-  // ---- loop ----
-  let fieldMoving = false;
+  function updateHudReadout() {
+    const d = new Date();
+    o.hudClock.textContent = clockSecFmt.format(d);
+    const clk = clockFmt.format(d);
+    if (clockTile && clk !== lastClockText) {
+      lastClockText = clk;
+      repaintTile(clockTile);
+    }
+    o.hudX.textContent = fmtCoord(cam.x / 10);
+    o.hudY.textContent = fmtCoord(-cam.y / 10);
+  }
 
-  function placeTiles() {
-    const zMin = zoom * 0.9;
-    const hw = (vw / zMin) * (0.5 + CFG.cullMargin) + C2;
-    const hh = (vh / zMin) * (0.5 + CFG.cullMargin) + C2;
-    for (const tile of tiles) {
-      const dx = tile.cx - cam.x;
-      const dy = tile.cy - cam.y;
-      const ax = hw + tile.w / 2;
-      const ay = hh + tile.h / 2;
-      let n = 0;
-      for (let kx = Math.ceil((-ax - dx) / W); kx <= Math.floor((ax - dx) / W); kx += 1) {
-        for (let ky = Math.ceil((-ay - dy) / H); ky <= Math.floor((ay - dy) / H); ky += 1) {
-          const el = tile.els[n] ?? makeEl(tile);
-          if (n >= tile.shown) el.style.display = "";
-          el.style.transform = `translate3d(${(dx + kx * W - tile.w / 2).toFixed(1)}px, ${(dy + ky * H - tile.h / 2).toFixed(1)}px, 0)`;
-          n += 1;
+  function renderFrame(bend) {
+    if (glCtx) {
+      const { gl, u, indexCount } = glCtx;
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.uniform2f(u.uView, vw / 2 / zoomEff, vh / 2 / zoomEff);
+      gl.uniform1f(u.uBend, bend);
+      for (const tile of tiles) {
+        if (!tile.copies.length || !tile.tex || tile.reveal <= 0.001) continue;
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, tile.tex);
+        gl.activeTexture(gl.TEXTURE1);
+        gl.bindTexture(gl.TEXTURE_2D, tile.tex2 || tile.tex);
+        gl.uniform2f(u.uSize, tile.w, tile.h);
+        gl.uniform1f(u.uRadius, tile.kind === "caption" ? 0 : CFG.radius);
+        gl.uniform1f(u.uHover, tile.hover);
+        gl.uniform1f(u.uReveal, tile.reveal);
+        gl.uniform1f(u.uZoom, tile.kind === "specimen" ? 1 : 0);
+        gl.uniform1f(u.uAlt, tile.tex2 ? 1 : 0);
+        for (const [x, y] of tile.copies) {
+          gl.uniform2f(u.uOffset, x, y);
+          gl.drawElements(gl.TRIANGLES, indexCount, gl.UNSIGNED_SHORT, 0);
         }
       }
-      for (let i = n; i < tile.shown; i += 1) tile.els[i].style.display = "none";
-      tile.shown = n;
+    } else if (ctx2d) {
+      ctx2d.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx2d.fillStyle = P.bg;
+      ctx2d.fillRect(0, 0, vw, vh);
+      ctx2d.save();
+      ctx2d.translate(vw / 2, vh / 2);
+      ctx2d.scale(zoomEff, zoomEff);
+      for (const tile of tiles) {
+        if (!tile.copies.length || tile.reveal <= 0.001) continue;
+        ctx2d.globalAlpha = tile.reveal;
+        const src = tile.hover > 0.5 && tile.canvas2 ? tile.canvas2 : tile.canvas;
+        for (const [x, y] of tile.copies) {
+          ctx2d.drawImage(src, x - tile.w / 2, y - tile.h / 2, tile.w, tile.h);
+        }
+      }
+      ctx2d.restore();
+      ctx2d.globalAlpha = 1;
     }
   }
 
@@ -678,53 +1325,56 @@ export function initCanvas(o) {
     last = ts;
     now += dt;
     frame += 1;
-    const frozen = o.isSheetOpen();
 
-    if (frozen) {
+    if (o.isSheetOpen()) {
       pending.x = pending.y = 0;
       vel.x = vel.y = 0;
-    } else {
-      if (pending.x || pending.y) {
-        cam.x -= pending.x / zoomEff;
-        cam.y -= pending.y / zoomEff;
-        pending.x = pending.y = 0;
-      }
-      if (flight) {
-        const k = Math.min(1, (now - flight.t0) / flight.dur);
-        const e = ease(k);
-        cam.x = flight.sx + (flight.tx - flight.sx) * e;
-        cam.y = flight.sy + (flight.ty - flight.sy) * e;
+      return;
+    }
+
+    if (pending.x || pending.y) {
+      cam.x -= pending.x / zoomEff;
+      cam.y -= pending.y / zoomEff;
+      pending.x = pending.y = 0;
+      dirty = true;
+    }
+
+    if (flight) {
+      const k = Math.min(1, (now - flight.t0) / flight.dur);
+      const e = easeInOut(k);
+      cam.x = flight.sx + (flight.tx - flight.sx) * e;
+      cam.y = flight.sy + (flight.ty - flight.sy) * e;
+      lastInput = now;
+      dirty = true;
+      if (k >= 1) flight = null;
+    } else if (!dragging && !reduced) {
+      if (keys.size) {
+        let kx = 0;
+        let ky = 0;
+        for (const k of keys) {
+          kx += DIRS[k][0];
+          ky += DIRS[k][1];
+        }
+        const a = 1 - 0.0025 ** dt;
+        vel.x += (kx * CFG.keySpeed - vel.x) * a;
+        vel.y += (ky * CFG.keySpeed - vel.y) * a;
         lastInput = now;
-        if (k >= 1) flight = null;
-      } else if (!dragging && !reduced) {
-        if (keys.size) {
-          let kx = 0;
-          let ky = 0;
-          for (const k of keys) {
-            kx += DIRS[k][0];
-            ky += DIRS[k][1];
-          }
-          const a = 1 - 0.0025 ** dt;
-          vel.x += (kx * CFG.keySpeed - vel.x) * a;
-          vel.y += (ky * CFG.keySpeed - vel.y) * a;
-          lastInput = now;
-        } else {
-          const f = CFG.friction ** (dt * 60);
-          vel.x *= f;
-          vel.y *= f;
-        }
-        if (now - lastInput > CFG.idleDelay && !o.isPaused()) {
-          const a = 1 - 0.985 ** (dt * 60);
-          const dx = Math.cos(now * 0.05) * CFG.drift;
-          const dy = Math.sin(now * 0.037 + 1) * CFG.drift * 0.7;
-          vel.x += (dx - vel.x) * a;
-          vel.y += (dy - vel.y) * a;
-        }
-        vel.x = clamp(vel.x, -8000, 8000);
-        vel.y = clamp(vel.y, -8000, 8000);
-        cam.x += vel.x * dt;
-        cam.y += vel.y * dt;
+      } else {
+        const f = CFG.friction ** (dt * 60);
+        vel.x *= f;
+        vel.y *= f;
       }
+      if (now - lastInput > CFG.idleDelay && !o.isPaused()) {
+        const a = 1 - 0.985 ** (dt * 60);
+        const dx = Math.cos(now * 0.05) * CFG.drift;
+        const dy = Math.sin(now * 0.037 + 1) * CFG.drift * 0.7;
+        vel.x += (dx - vel.x) * a;
+        vel.y += (dy - vel.y) * a;
+      }
+      vel.x = clamp(vel.x, -8000, 8000);
+      vel.y = clamp(vel.y, -8000, 8000);
+      cam.x += vel.x * dt;
+      cam.y += vel.y * dt;
     }
 
     if (dt > 0) {
@@ -737,24 +1387,64 @@ export function initCanvas(o) {
     }
     prev.x = cam.x;
     prev.y = cam.y;
+
     speedS = (Math.hypot(sv.x, sv.y) * zoom) / Math.max(vw, vh);
     const speed = reduced ? 0 : speedS;
     zoomEff = zoom * (1 - Math.min(speed * CFG.speedZoom, 0.1));
-    world.style.transform = `scale(${zoomEff.toFixed(4)})`;
+    const bend = Math.min(speed * CFG.bend, CFG.maxBend, 0.4);
 
-    placeTiles();
+    // Enumerate visible wrapped copies
+    const grow = 1 / (1 - 2 * Math.min(CFG.maxBend, 0.4));
+    const zMin = zoom * 0.9;
+    const hw = (vw / zMin) * (0.5 + CFG.cullMargin) * grow + C2;
+    const hh = (vh / zMin) * (0.5 + CFG.cullMargin) * grow + C2;
+
+    let animating = false;
+    for (const tile of tiles) {
+      if (tile.reveal < 1) {
+        const rk = clamp((now - revealStart - tile.revealDelay) / 0.75, 0, 1);
+        tile.reveal = easeOut(rk);
+        animating = true;
+      }
+      const dx = tile.cx - cam.x;
+      const dy = tile.cy - cam.y;
+      const ax = hw + tile.w / 2;
+      const ay = hh + tile.h / 2;
+      tile.copies.length = 0;
+      for (let kx = Math.ceil((-ax - dx) / W); kx <= Math.floor((ax - dx) / W); kx += 1) {
+        for (let ky = Math.ceil((-ay - dy) / H); ky <= Math.floor((ay - dy) / H); ky += 1) {
+          tile.copies.push([dx + kx * W, dy + ky * H]);
+        }
+      }
+    }
 
     fieldMoving = Boolean(flight) || dragging || speedS > 0.05;
-    if (pulse.units.size && now > pulse.until) {
-      pulse = { units: new Set(), until: 0 };
-      applyHot();
+    updateHover();
+    updateAim();
+
+    const lit = hovered ?? aimed;
+    for (const tile of tiles) {
+      tile.pulse = Math.max(0, tile.pulse - dt);
+      const matchUnit = lit && lit.unit !== null && lit.unit === tile.unit;
+      const target = tile === lit || tile.pulse > 0 || matchUnit ? 1 : 0;
+      tile.hover += (target - tile.hover) * (1 - 0.85 ** (dt * 60));
+      if (Math.abs(target - tile.hover) > 0.002) animating = true;
     }
-    if (frame % 6 === 0) {
-      updateHoverFromPoint();
-      updateAim();
+
+    if (labelOn && !reduced) {
+      const la = 1 - Math.exp(-dt / 0.06);
+      labelX += (labelTx - labelX) * la;
+      labelY += (labelTy - labelY) * la;
+      o.label.style.transform = `translate3d(${labelX.toFixed(1)}px, ${labelY.toFixed(1)}px, 0)`;
     }
+
     if (frame % 10 === 0) {
       updateHudReadout();
+    }
+
+    if (speed > 0.0004 || animating || dirty || dragging || flight) {
+      renderFrame(bend);
+      dirty = false;
     }
   }
 
@@ -775,19 +1465,6 @@ export function initCanvas(o) {
       start();
     }
   });
-  function updateHudReadout() {
-    const d = new Date();
-    o.hudClock.textContent = clockSecFmt.format(d);
-    const txt = clockFmt.format(d);
-    if (clockTile) {
-      for (const el of clockTile.els) {
-        const node = el.querySelector(".ft-clock-time");
-        if (node && node.textContent !== txt) node.textContent = txt;
-      }
-    }
-    o.hudX.textContent = fmtCoord(cam.x / 10);
-    o.hudY.textContent = fmtCoord(-cam.y / 10);
-  }
 
   if (o.hudTz) {
     try {
@@ -802,23 +1479,24 @@ export function initCanvas(o) {
   updateHudReadout();
   start();
 
-  function refreshTiles(onlyLive) {
-    for (const t of tiles) {
-      if (!t.dynamic || (onlyLive && t.spec.key !== "live")) continue;
-      t.html = specInner(t.spec);
-      for (const el of t.els) el.innerHTML = t.html;
-    }
-  }
-
   return {
     fly,
-    refresh: () => refreshTiles(false),
-    refreshLive: () => refreshTiles(true),
+    setTheme(mode) {
+      P = PALETTES[mode === "light" ? "light" : "dark"];
+      glCtx?.setClear(P.clear);
+      repaintAllText();
+    },
+    refresh() {
+      Promise.all([...SPECS.map((s) => s.key), "live"].map(loadSpecimenKey));
+    },
+    refreshLive() {
+      loadSpecimenKey("live");
+    },
     destroy() {
       stop();
       for (const fn of cleanups) fn();
-      world.replaceChildren();
+      glCtx?.destroy();
+      stage.replaceChildren();
     },
   };
 }
-
