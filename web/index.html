@@ -46,7 +46,7 @@
           <button type="button" id="hud-builder-btn" class="hud-pill hud-pill-strong" data-open-sheet="builder">
             Builder
           </button>
-          <button type="button" id="hud-setup-btn" class="hud-pill hud-desktop-only" data-fly="setup">
+          <button type="button" id="hud-setup-btn" class="hud-pill hud-tablet-up" data-fly="setup">
             Setup
           </button>
           <a href="https://github.com/bagasadh/termcard" target="_blank" rel="noopener noreferrer" class="hud-pill hud-desktop-only">
@@ -58,8 +58,9 @@
           <button type="button" id="motion-toggle" class="hud-pill hud-desktop-only" aria-pressed="false">
             Pause typing
           </button>
-          <button type="button" id="theme-toggle" class="hud-pill" aria-pressed="false">
-            Light mode
+          <button type="button" id="theme-toggle" class="hud-pill" aria-pressed="false" aria-label="Switch to light mode">
+            <span class="lbl-full">Light mode</span>
+            <span class="lbl-short" aria-hidden="true">Light</span>
           </button>
           <button type="button" id="sound-toggle" class="hud-pill sound" aria-pressed="false" aria-label="Toggle UI sound">
             <span class="eq" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
@@ -91,12 +92,22 @@
         <div class="sheet__topbar">
           <div class="sheet__head-title">
             <p class="section-code">WORKBENCH / 01</p>
-            <h2 id="builder-heading">Build your profile cards</h2>
+            <h2 id="builder-heading"><span class="lbl-full">Build your profile cards</span><span class="lbl-short" aria-hidden="true">Builder</span></h2>
           </div>
           <div class="section-head-actions">
-            <button type="button" id="open-import-btn" class="ctrl-btn">Import JSON</button>
-            <button type="button" id="reset-default-btn" class="ctrl-btn">Reset starter</button>
-            <button type="button" id="close-sheet-btn" class="ctrl-btn sheet-close-btn" data-close-sheet aria-label="Close workbench and return to infinite canvas">Back to canvas &times;</button>
+            <button type="button" id="open-import-btn" class="ctrl-btn">
+              <span class="lbl-full">Import JSON</span>
+              <span class="lbl-short" aria-hidden="true">Import</span>
+            </button>
+            <button type="button" id="reset-default-btn" class="ctrl-btn">
+              <span class="lbl-full">Reset starter</span>
+              <span class="lbl-short" aria-hidden="true">Reset</span>
+            </button>
+            <button type="button" id="close-sheet-btn" class="ctrl-btn sheet-close-btn" data-close-sheet aria-label="Close workbench and return to infinite canvas">
+              <span class="lbl-full">Back to canvas</span>
+              <span class="lbl-short" aria-hidden="true">Close</span>
+              <span aria-hidden="true">&times;</span>
+            </button>
           </div>
         </div>
 

@@ -1119,7 +1119,17 @@ function applyPageTheme(mode) {
   pageTheme = mode === "light" ? "light" : "dark";
   const isLight = pageTheme === "light";
   document.documentElement.setAttribute("data-theme", pageTheme);
-  el.themeToggle.textContent = isLight ? "Dark mode" : "Light mode";
+  const fullLabel = isLight ? "Dark mode" : "Light mode";
+  const shortLabel = isLight ? "Dark" : "Light";
+  const fullEl = el.themeToggle.querySelector(".lbl-full");
+  const shortEl = el.themeToggle.querySelector(".lbl-short");
+  if (fullEl && shortEl) {
+    fullEl.textContent = fullLabel;
+    shortEl.textContent = shortLabel;
+  } else {
+    el.themeToggle.textContent = fullLabel;
+  }
+  el.themeToggle.setAttribute("aria-label", `Switch to ${fullLabel.toLowerCase()}`);
   el.themeToggle.setAttribute("aria-pressed", String(isLight));
   canvas?.setTheme(pageTheme);
   saveToStorage();

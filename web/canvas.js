@@ -9,9 +9,10 @@ const CFG = {
   columns: 7,
   zoomRef: 1840,
   minZoom: 0.46,
-  heroFill: 0.9,
+  heroFill: 0.84,
   heroFillBelow: 700,
-  friction: 0.925,
+  friction: 0.928,
+  touchFriction: 0.954,
   wheel: 7,
   keySpeed: 1500,
   drift: 20,
@@ -19,7 +20,7 @@ const CFG = {
   bend: 0.11,
   maxBend: 0.2,
   speedTau: 0.12,
-  flingWindow: 80,
+  flingWindow: 110,
   speedZoom: 0.045,
   radius: 10,
   segments: 20,
@@ -142,7 +143,7 @@ void main() {
 }
 `;
 
-function createGL(canvasEl) {
+function createGL(canvasEl, segCount = CFG.segments) {
   const opts = { antialias: true, alpha: false, depth: false, stencil: false, powerPreference: "high-performance" };
   let isWebGL2 = true;
   let gl = canvasEl.getContext("webgl2", opts);
@@ -179,8 +180,8 @@ function createGL(canvasEl) {
     return null;
   }
 
-  // Build subdivided unit quad (segments x segments) so barrel bend curves smoothly.
-  const seg = CFG.segments;
+  // Build subdivided unit quad (segCount x segCount) so barrel bend curves smoothly.
+  const seg = segCount;
   const cols = seg + 1;
   const verts = new Float32Array(cols * cols * 4);
   let vi = 0;
@@ -609,7 +610,7 @@ export function initCanvas(o) {
   let canvasEl = document.createElement("canvas");
   stage.replaceChildren(canvasEl);
 
-  const glCtx = createGL(canvasEl);
+  const glCtx = createGL(canvasEl, coarse ? 12 : CFG.segments);
   let ctx2d = null;
   if (!glCtx) {
     // A canvas whose WebGL context succeeded once cannot return a 2D context, so create a fresh element.
@@ -1280,17 +1281,27 @@ export function initCanvas(o) {
     flyTo(nearest(tiles.filter((t) => t.anchor === name)));
   }
 
+  let activeFriction = coarse ? CFG.touchFriction : CFG.friction;
+
   // Input handlers
+  on(stage, "touchmove", (e) => {
+    if (!o.isSheetOpen()) e.preventDefault();
+  }, { passive: false });
+
   on(stage, "pointerdown", (e) => {
     if (o.isSheetOpen() || !e.isPrimary) return;
+    if (down && down.id !== e.pointerId) return;
     try {
       stage.setPointerCapture(e.pointerId);
     } catch {
       // Optional pointer capture.
     }
-    down = { lx: e.clientX, ly: e.clientY, t: performance.now(), moved: 0 };
+    const tNow = performance.now();
+    const isTouch = e.pointerType === "touch";
+    activeFriction = isTouch ? CFG.touchFriction : CFG.friction;
+    down = { id: e.pointerId, isTouch, lx: e.clientX, ly: e.clientY, lt: tNow, t: tNow, moved: 0, vx: 0, vy: 0 };
     samples.length = 0;
-    samples.push({ t: e.timeStamp, x: e.clientX, y: e.clientY });
+    samples.push({ t: tNow, x: e.clientX, y: e.clientY });
     dragging = true;
     flight = null;
     vel.x = vel.y = 0;
@@ -1301,19 +1312,25 @@ export function initCanvas(o) {
 
   on(stage, "pointermove", (e) => {
     if (e.pointerType === "mouse") ptr = { x: e.clientX, y: e.clientY };
-    if (!down || !dragging) return;
+    if (!down || !dragging || e.pointerId !== down.id) return;
+    const tNow = performance.now();
     const dx = e.clientX - down.lx;
     const dy = e.clientY - down.ly;
+    const stepDt = (tNow - down.lt) / 1000;
+    if (stepDt > 0.002 && stepDt < 0.2) {
+      const ivx = -dx / stepDt / zoomEff;
+      const ivy = -dy / stepDt / zoomEff;
+      down.vx = down.vx * 0.4 + ivx * 0.6;
+      down.vy = down.vy * 0.4 + ivy * 0.6;
+    }
     down.lx = e.clientX;
     down.ly = e.clientY;
+    down.lt = tNow;
     down.moved += Math.abs(dx) + Math.abs(dy);
     pending.x += dx;
     pending.y += dy;
-    for (const c of e.getCoalescedEvents?.() ?? []) samples.push({ t: c.timeStamp, x: c.clientX, y: c.clientY });
-    if (!samples.length || samples[samples.length - 1].t < e.timeStamp) {
-      samples.push({ t: e.timeStamp, x: e.clientX, y: e.clientY });
-    }
-    while (samples.length > 2 && e.timeStamp - samples[0].t > CFG.flingWindow) samples.shift();
+    samples.push({ t: tNow, x: e.clientX, y: e.clientY });
+    while (samples.length > 2 && tNow - samples[0].t > CFG.flingWindow) samples.shift();
     lastInput = now;
   });
 
@@ -1322,18 +1339,29 @@ export function initCanvas(o) {
     const a = samples[0];
     const b = samples[samples.length - 1];
     const dt = (b.t - a.t) / 1000;
-    if (dt < 0.008 || at - b.t > 100) return { x: 0, y: 0 };
+    if (dt < 0.006 || at - b.t > 140) return { x: 0, y: 0 };
     return { x: -(b.x - a.x) / dt / zoomEff, y: -(b.y - a.y) / dt / zoomEff };
   }
 
   function endDrag(e) {
-    if (!down) return;
-    const quick = down.moved < 8 && performance.now() - down.t < 500;
-    if (!reduced) {
-      const v = pointerVel(e.timeStamp);
-      vel.x = clamp(v.x, -6000, 6000);
-      vel.y = clamp(v.y, -6000, 6000);
+    if (!down || e.pointerId !== down.id) return;
+    const tNow = performance.now();
+    const tapSlop = down.isTouch ? 14 : 8;
+    const quick = down.moved < tapSlop && tNow - down.t < 500;
+    if (!reduced && !quick) {
+      const sv1 = pointerVel(tNow);
+      const staleMs = tNow - down.lt;
+      const boost = down.isTouch ? 1.15 : 1;
+      let vx = sv1.x;
+      let vy = sv1.y;
+      if (staleMs < 95 && Math.hypot(down.vx, down.vy) > Math.hypot(vx, vy) * 0.85) {
+        vx = vx * 0.45 + down.vx * 0.55;
+        vy = vy * 0.45 + down.vy * 0.55;
+      }
+      vel.x = clamp(vx * boost, -6500, 6500);
+      vel.y = clamp(vy * boost, -6500, 6500);
     }
+    const wasTouch = down.isTouch;
     down = null;
     dragging = false;
     stage.classList.remove("is-dragging");
@@ -1344,6 +1372,7 @@ export function initCanvas(o) {
         runAction(hit.action);
       }
     }
+    if (wasTouch) ptr = null;
   }
   on(stage, "pointerup", endDrag);
   on(stage, "pointercancel", endDrag);
@@ -1366,6 +1395,7 @@ export function initCanvas(o) {
         dy = 0;
       }
       flight = null;
+      activeFriction = CFG.friction;
       lastInput = now;
       if (reduced) {
         cam.x += dx / zoomEff;
@@ -1504,7 +1534,7 @@ export function initCanvas(o) {
         vel.y += (ky * CFG.keySpeed - vel.y) * a;
         lastInput = now;
       } else {
-        const f = CFG.friction ** (dt * 60);
+        const f = activeFriction ** (dt * 60);
         vel.x *= f;
         vel.y *= f;
       }

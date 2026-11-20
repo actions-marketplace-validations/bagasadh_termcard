@@ -1000,6 +1000,9 @@ input[type="range"] {
 /* ===== Infinite canvas shell (ReframeHK-style field, monochrome) ===== */
 html,
 body {
+  position: fixed;
+  inset: 0;
+  width: 100%;
   height: 100%;
   overflow: hidden;
   overscroll-behavior: none;
@@ -1008,6 +1011,7 @@ body {
 body {
   user-select: none;
   -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .sheet__panel,
@@ -1343,11 +1347,9 @@ body {
 .sheet__backdrop {
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.68);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
+  background: rgba(0, 0, 0, 0.76);
   opacity: 0;
-  transition: opacity 280ms cubic-bezier(0.2, 0.8, 0.1, 1);
+  transition: opacity 260ms cubic-bezier(0.2, 0.8, 0.1, 1);
 }
 
 .sheet.is-open .sheet__backdrop {
@@ -1367,8 +1369,10 @@ body {
   overflow-y: auto;
   overflow-x: hidden;
   overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
   transform: translate3d(calc(100% + 24px), 0, 0);
-  transition: transform 420ms cubic-bezier(0.2, 0.8, 0.1, 1);
+  transition: transform 380ms cubic-bezier(0.2, 0.8, 0.1, 1);
   scrollbar-width: thin;
   scrollbar-color: var(--scroll-thumb) var(--scroll-track);
 }
@@ -1435,12 +1439,38 @@ body {
   border-top: 1px solid var(--hairline);
 }
 
-.hud-desktop-only {
+.hud-desktop-only,
+.hud-tablet-up {
   display: inline-flex;
 }
 
-/* ===== Responsive ===== */
+.lbl-short {
+  display: none;
+}
+
+.hud-pill:active {
+  transform: scale(0.97);
+}
+
+@media (pointer: coarse) {
+  .cross,
+  .aim,
+  .cursor-label {
+    display: none;
+  }
+}
+
+/* ===== Responsive: Tablet / Small Laptop (700px - 1059px) ===== */
 @media (max-width: 1059px) {
+  .hud-desktop-only,
+  .mark-by {
+    display: none;
+  }
+
+  .hud-pill {
+    padding: 8px 13px;
+  }
+
   .builder-grid {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -1454,33 +1484,125 @@ body {
   }
 }
 
+/* ===== Responsive: Mobile (< 700px) ===== */
 @media (max-width: 699px) {
-  .hud-desktop-only,
-  .mark-by,
+  .hud {
+    padding: 10px 12px;
+    gap: 8px;
+  }
+
+  .hud--top {
+    padding-top: max(10px, env(safe-area-inset-top));
+  }
+
+  .hud--bottom {
+    padding-bottom: max(10px, env(safe-area-inset-bottom));
+  }
+
+  .hud-tablet-up,
+  .mark-word,
   .hud__count,
   .sound__txt,
-  .coords__xy {
+  .coords__xy,
+  .lbl-full {
     display: none;
   }
 
-  .hud-pill {
-    padding: 8px 12px;
+  .lbl-short {
+    display: inline;
   }
 
-  .mark-word {
-    font-size: 1.3rem;
+  .mark {
+    min-width: 44px;
+    min-height: 44px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  .mark-icon {
+    width: 32px;
+    height: 32px;
   }
 
   .hud__right {
     gap: 6px;
   }
 
+  .hud__nav,
+  .hud__controls {
+    gap: 6px;
+  }
+
+  .hud-pill {
+    font-size: 0.8125rem;
+    min-height: 44px;
+    padding: 0 11px;
+  }
+
+  .sound {
+    min-width: 44px;
+    padding: 0 11px;
+  }
+
+  .hint,
+  .coords {
+    font-size: 10px;
+    gap: 7px;
+  }
+
   .sheet__panel {
-    top: 8px;
-    left: 8px;
-    right: 8px;
-    bottom: 8px;
+    top: max(6px, env(safe-area-inset-top));
+    left: 0;
+    right: 0;
+    bottom: 0;
     width: auto;
+    border-radius: 14px 14px 0 0;
+    border-left: 0;
+    border-right: 0;
+    border-bottom: 0;
+    transform: translate3d(0, 100%, 0);
+  }
+
+  .sheet.is-open .sheet__panel {
+    transform: translate3d(0, 0, 0);
+  }
+
+  .sheet__topbar {
+    padding: 10px 12px;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .sheet__topbar .section-code {
+    display: none;
+  }
+
+  .sheet__topbar h2 {
+    font-size: 1rem;
+  }
+
+  .sheet__topbar .section-head-actions {
+    gap: 6px;
+  }
+
+  .sheet__topbar .ctrl-btn {
+    font-size: 0.8rem;
+    padding: 6px 10px;
+    min-height: 44px;
+  }
+
+  .sheet__body {
+    padding: 14px 12px max(28px, env(safe-area-inset-bottom));
+  }
+
+  .panel-block {
+    padding: 14px 12px;
+  }
+
+  .text-input,
+  .select-input,
+  .import-textarea {
+    font-size: 1rem;
   }
 
   .range-row,
@@ -1492,6 +1614,11 @@ body {
 
   .setup-steps {
     gap: 18px;
+  }
+
+  .footer-inner {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }
 
