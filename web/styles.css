@@ -1,53 +1,53 @@
-/* Palette tokens verified against WCAG AA (4.5:1 text, 3:1 UI borders) in dark and light modes. */
+/* Monochrome palette (#000000, #202020, #ffffff) verified against WCAG AA in dark and light modes. */
 :root,
 [data-theme="dark"] {
-  --bg: #0e0e0e;
-  --surface: #171717;
-  --surface-2: #20201e;
-  --text: #f2f0e9;
-  --muted: #a8a59e;
-  --border: #6b6962;
-  --hairline: #2d2c29;
-  --accent: #f05a36;
-  --accent-hover: #ff704d;
-  --accent-ink: #0e0e0e;
-  --bone: #efede6;
-  --bone-ink: #141414;
-  --bone-muted: #4a4843;
-  --bone-border: #8a867d;
-  --focus: #f59e0b;
-  --status-bg: #0f2918;
-  --status-ink: #bbf7d0;
-  --status-border: #3fb950;
-  --error-bg: #361212;
-  --error-ink: #fecaca;
-  --error-border: #f87171;
-  --code-bg: #111110;
+  --bg: #000000;
+  --surface: #202020;
+  --surface-2: #2c2c2c;
+  --text: #ffffff;
+  --muted: #b8b8b8;
+  --border: #808080;
+  --hairline: #333333;
+  --accent: #ffffff;
+  --accent-hover: #e0e0e0;
+  --accent-ink: #000000;
+  --bone: #ffffff;
+  --bone-ink: #000000;
+  --bone-muted: #525252;
+  --bone-border: #767676;
+  --focus: #ffffff;
+  --status-bg: #202020;
+  --status-ink: #ffffff;
+  --status-border: #ffffff;
+  --error-bg: #ffffff;
+  --error-ink: #000000;
+  --error-border: #ffffff;
+  --code-bg: #121212;
 }
 
 [data-theme="light"] {
-  --bg: #f2f0e9;
-  --surface: #ffffff;
-  --surface-2: #e9e5da;
-  --text: #161614;
-  --muted: #52504a;
-  --border: #8a867d;
-  --hairline: #d4d0c5;
-  --accent: #c13211;
-  --accent-hover: #a1280c;
+  --bg: #ffffff;
+  --surface: #f4f4f4;
+  --surface-2: #e6e6e6;
+  --text: #000000;
+  --muted: #525252;
+  --border: #767676;
+  --hairline: #d6d6d6;
+  --accent: #202020;
+  --accent-hover: #000000;
   --accent-ink: #ffffff;
-  --bone: #141414;
-  --bone-ink: #f2f0e9;
-  --bone-muted: #b0ada5;
-  --bone-border: #6b6962;
-  --focus: #b82e0f;
-  --status-bg: #e7f6ec;
-  --status-ink: #0f4c25;
-  --status-border: #2f855a;
-  --error-bg: #fde8e8;
-  --error-ink: #7f1d1d;
-  --error-border: #c53030;
-  --code-bg: #f8f7f2;
+  --bone: #202020;
+  --bone-ink: #ffffff;
+  --bone-muted: #c2c2c2;
+  --bone-border: #8a8a8a;
+  --focus: #000000;
+  --status-bg: #f4f4f4;
+  --status-ink: #000000;
+  --status-border: #202020;
+  --error-bg: #000000;
+  --error-ink: #ffffff;
+  --error-border: #000000;
+  --code-bg: #f4f4f4;
 }
 
 *,
@@ -287,7 +287,23 @@ pre,
 }
 
 .btn-secondary-bone:hover {
-  background: rgba(128, 128, 128, 0.14);
+  background: rgba(128, 128, 128, 0.16);
+}
+
+.tile-brand .btn-primary {
+  background: var(--bone-ink);
+  color: var(--bone);
+  border-color: var(--bone-ink);
+}
+
+.tile-brand .btn-primary:hover {
+  background: #202020;
+  border-color: #202020;
+}
+
+[data-theme="light"] .tile-brand .btn-primary:hover {
+  background: #e0e0e0;
+  border-color: #e0e0e0;
 }
 
 .mobile-only {
@@ -487,7 +503,10 @@ pre,
   font-family: "Instrument Serif", Georgia, serif;
   font-style: italic;
   font-size: 1.18em;
-  color: var(--accent);
+  color: var(--text);
+  text-decoration: underline;
+  text-decoration-style: dashed;
+  text-underline-offset: 4px;
 }
 
 .editorial-foot {
